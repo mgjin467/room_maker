@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>방 가구 배치 3D 시뮬레이터</title>
+<link rel="stylesheet" href="/src/style.css">
+</head><body>
+<div id="app">
+  <div id="v"><canvas id="c"></canvas>
+    <div id="tb">
+      <div class="grp"><button data-v="door">입구 시점</button><button data-v="iso">대각선</button><button data-v="top">위에서</button><button data-v="plan" title="직교 평면도 (2D)">평면도</button></div>
+      <div class="grp"><button id="undo" title="실행 취소 (Ctrl+Z)">↶</button><button id="redo" title="다시 실행 (Ctrl+Y)">↷</button></div>
+      <div class="grp"><button id="mz" title="줄자: 바닥 두 점 클릭">📏 줄자</button><button id="night">🌙 야간</button><button id="shot" title="3D 화면 PNG 저장">📷</button></div>
+      <details class="grp" id="dd"><summary>표시 ▾</summary><div id="ddm"></div></details>
+    </div>
+    <div id="qb" hidden>
+      <b id="qbn"></b>
+      <button class="qi" data-q="m" title="5% 작게">−</button><input class="qi" id="qbp" type="number" min="1" step="5" title="전체 크기 % (기본 대비)"><span class="qi">%</span><button class="qi" data-q="p" title="5% 크게">+</button>
+      <button data-q="rot" title="90° 회전 (R)">⟳</button><button data-q="dup" title="복제 (Ctrl+D)">복제</button><button class="qi" data-q="lock" title="잠금">🔓</button><button data-q="edit" title="상세 편집">편집</button><button data-q="del" title="삭제 (Del)">삭제</button>
+    </div>
+    <div id="hint"></div>
+    <div id="toast" hidden></div>
+  </div>
+  <aside id="p">
+    <nav id="tabs"><button data-t="add">가구 추가</button><button data-t="sel">선택</button><button data-t="room">방·창호</button><button data-t="light">조명</button><button data-t="list">목록</button><button data-t="file">저장·출력</button></nav>
+    <section id="t-add">
+      <input type="search" id="q" placeholder="가구·소품 검색 (예: 소파, 화분, 스탠드)">
+      <div id="pre"></div>
+      <div class="r"><button class="o" id="addc">+ 직접 입력 가구 (박스)</button></div>
+      <p class="mu sm">● 표시는 사용자가 바꾼 크기가 저장된 항목입니다. 다음에 추가할 때 그 크기로 들어갑니다.</p>
+    </section>
+    <section id="t-sel" hidden></section>
+    <section id="t-room" hidden></section>
+    <section id="t-light" hidden></section>
+    <section id="t-list" hidden></section>
+    <section id="t-file" hidden></section>
+  </aside>
+</div>
+<div id="pr"></div>
+<script type="module" src="/src/main.js"></script>
+</body></html>
