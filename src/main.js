@@ -7,7 +7,7 @@ import { drawPlan, polyArea } from './plan.js';
 import { RECT, orient, edgesOf, arcPts, outline, bbox, inside, segDist, P as EP, SHAPES, shapePreset, isRect } from './geom.js';
 import { MATS, MATN, makeMat, VIEWS, VTIME } from './materials.js';
 import { saveFile, isMobile } from './save.js';
-import { Cloud } from './cloud.js';
+import { Cloud, takeCfgFromURL } from './cloud.js';
 import { initAI } from './aiui.js';
 import { faceTexture, sampleSkin } from './faces.js';
 import { initHScroll, reveal } from './hscroll.js';
@@ -1375,11 +1375,33 @@ function printPlan() {
 }
 
 // 파일·계정 탭
+const gLogin = () => { if (!Cloud.enabled) { showTab('file'); if (mq.matches) setSheet('full'); return toast('이 기기는 아직 클라우드 연결 전입니다 — 저장 탭 안내를 따라 한 번만 연결하세요', 6000); } Cloud.loginGoogle().catch(e => toast(e.message, 7000)); };
 function renderAccount() {
   const el = $('acct'); if (!el) return; el.innerHTML = '';
-  if (!Cloud.enabled) { el.append(h('div', { class: 'mu sm' }, '☁ 클라우드 미설정 — ', h('a', { href: '#', onclick: e => { e.preventDefault(); showTab('file'); } }, '설정하기'))); return; }
   if (Cloud.user) el.append(h('div', { class: 'acct' }, h('span', {}, `☁ ${Cloud.user.email || Cloud.user.displayName || '로그인됨'}`), BTN('로그아웃', () => Cloud.logout(), 'c')));
-  else el.append(h('div', { class: 'acct' }, h('span', { class: 'mu' }, '로그인하면 모든 기기에서 이어서 작업'), BTN('Google 로그인', () => Cloud.loginGoogle().catch(e => toast(e.message, 6000)), 'b')));
+  else el.append(h('div', { class: 'acct' }, h('span', { class: 'mu' }, '로그인하면 모든 기기에서 이어서 작업'), BTN('Google 로그인', gLogin, 'b')));
+  const mb = $('ddacct'); if (mb) mb.textContent = Cloud.user ? '☁ ' + (Cloud.user.email || '로그인됨') : '☁ 로그인';
+}
+// 저장 탭의 계정 영역: 연결 전 / 로그인 전 / 로그인 후
+function loginBlock(cfgTa, em, pw) {
+  const emailRow = () => [h('p', { class: 'mu sm' }, '또는 이메일로'), G(2, em, pw),
+    h('div', { class: 'r' }, BTN('로그인', () => Cloud.loginEmail(em.value, pw.value).catch(e => toast(e.message, 6000))), BTN('회원가입', () => Cloud.loginEmail(em.value, pw.value, true).catch(e => toast(e.message, 6000))), BTN('비밀번호 재설정', () => Cloud.resetPw(em.value).then(() => toast('메일을 보냈습니다')).catch(e => toast(e.message))))];
+  if (!Cloud.enabled) return h('div', { class: 'box login' },
+    h('div', { class: 'r' }, BTN('Google 계정으로 로그인', gLogin, 'b dis')),
+    h('p', { class: 'warn sm' }, '이 기기(브라우저)에는 아직 클라우드 연결 설정이 없어 로그인할 수 없습니다. 아래 중 한 가지만 한 번 하면 됩니다.'),
+    h('ol', { class: 'steps sm' },
+      h('li', {}, h('b', {}, '가장 쉬움: '), '이미 연결된 PC에서 저장 탭 → ', h('b', {}, '「📱 다른 기기 연결」'), ' → 나오는 QR 코드를 이 휴대폰 카메라로 찍기'),
+      h('li', {}, h('b', {}, '한 번에 모든 기기: '), 'PC에서 「설정 파일 코드 복사」 → 프로젝트의 src/firebase.config.js 에 붙여 넣고 재배포 (또는 Vercel 환경변수 VITE_FIREBASE_*)'),
+      h('li', {}, '직접: Firebase 콘솔 → 프로젝트 설정 → 내 앱(웹)의 firebaseConfig 를 아래에 붙여 넣기')),
+    h('details', {}, h('summary', {}, 'firebaseConfig 직접 붙여 넣기'),
+      h('p', { class: 'mu sm' }, `프로젝트 ${Cloud.cfg.projectId} · 데이터베이스 '${Cloud.cfg.databaseId}'`), cfgTa,
+      h('div', { class: 'r' }, BTN('설정 저장 후 연결', () => AI.saveFirebase(cfgTa.value), 'b'))),
+    Cloud.error && !/없습니다/.test(Cloud.error) ? h('p', { class: 'warn' }, Cloud.error) : null);
+  const tools = h('details', {}, h('summary', {}, 'Firebase 설정 변경 · 설정 파일 코드'), cfgTa,
+    h('div', { class: 'r' }, BTN('설정 저장 후 다시 연결', () => AI.saveFirebase(cfgTa.value)), BTN('보안 규칙 복사', () => AI.copyRules()), BTN('설정 파일 코드 복사 (firebase.config.js)', () => AI.copyCfgFile())));
+  const link = BTN('📱 다른 기기 연결 (QR)', () => AI.openLink());
+  if (Cloud.user) return h('div', {}, h('div', { class: 'box' }, h('p', {}, `로그인: ${Cloud.user.email || Cloud.user.displayName}`), h('p', { class: 'mu sm' }, `프로젝트·내 크기·내 가구·AI 키·갤러리가 클라우드(${Cloud.cfg.databaseId})에 자동 저장되고, 다른 기기에서 같은 계정으로 로그인하면 자동으로 불러옵니다.`), h('div', { class: 'r' }, BTN('지금 동기화', () => onLogin(Cloud.user), 'b'), link, BTN('로그아웃', () => Cloud.logout()))), tools);
+  return h('div', {}, h('div', { class: 'box login' }, h('div', { class: 'r' }, BTN('Google 계정으로 로그인', gLogin, 'b big')), ...emailRow(), h('div', { class: 'r' }, link)), tools);
 }
 function renderFile() {
   const b = $('t-file'); if (b.hidden && b.childElementCount) return; b.innerHTML = '';
@@ -1390,16 +1412,7 @@ function renderFile() {
   const cfgTa = h('textarea', { rows: 5, placeholder: 'Firebase 콘솔 → 프로젝트 설정 → 내 앱(웹)의 firebaseConfig 코드를 그대로 붙여넣기' });
   app(b,
     h('h3', {}, '☁ 클라우드 계정'),
-    !Cloud.enabled ? h('div', { class: 'box' },
-      h('p', { class: 'sm' }, `Firebase 프로젝트 ${Cloud.cfg.projectId} · 데이터베이스 '${Cloud.cfg.databaseId}' 에 저장합니다. 웹 앱 설정(apiKey, appId)을 한 번 붙여 넣어 주세요.`),
-      cfgTa, h('div', { class: 'r' }, BTN('설정 저장 후 연결', () => AI.saveFirebase(cfgTa.value), 'b')),
-      Cloud.error ? h('p', { class: 'warn' }, Cloud.error) : null)
-      : Cloud.user ? h('div', { class: 'box' }, h('p', {}, `로그인: ${Cloud.user.email || Cloud.user.displayName}`), h('p', { class: 'mu sm' }, `프로젝트·내 크기·내 가구·AI 키·갤러리가 클라우드(${Cloud.cfg.databaseId})에 자동 저장됩니다.`), h('div', { class: 'r' }, BTN('지금 동기화', () => onLogin(Cloud.user), 'b'), BTN('로그아웃', () => Cloud.logout())))
-        : h('div', { class: 'box' },
-          h('div', { class: 'r' }, BTN('Google 계정으로 로그인', () => Cloud.loginGoogle().catch(e => toast(e.message, 7000)), 'b')),
-          h('p', { class: 'mu sm' }, '또는 이메일로'), G(2, em, pw),
-          h('div', { class: 'r' }, BTN('로그인', () => Cloud.loginEmail(em.value, pw.value).catch(e => toast(e.message, 6000))), BTN('회원가입', () => Cloud.loginEmail(em.value, pw.value, true).catch(e => toast(e.message, 6000))), BTN('비밀번호 재설정', () => Cloud.resetPw(em.value).then(() => toast('메일을 보냈습니다')).catch(e => toast(e.message))))),
-    Cloud.enabled ? h('details', {}, h('summary', {}, 'Firebase 설정 변경'), cfgTa, h('div', { class: 'r' }, BTN('설정 저장 후 다시 연결', () => AI.saveFirebase(cfgTa.value)), BTN('보안 규칙 복사', () => AI.copyRules()))) : null,
+    loginBlock(cfgTa, em, pw),
     h('h3', {}, '프로젝트 (자동 저장)'),
     F('현재 프로젝트', bsel(names.map(n => [n, n]), () => projName, v => { if (v !== projName) { openProject(v); } })),
     h('div', { class: 'r' },
@@ -1434,7 +1447,13 @@ function importJSON(t, fn) {
 
 // ---------- 툴바 ----------
 const TBK = [['snap', '스냅·벽/가구 붙이기'], ['handles', '벽 이동 핸들'], ['shapeEdit', '방 모양 편집 (꼭짓점)'], ['labels', '라벨 (책장1 등)'], ['ceil', '천장 표시'], ['vdoor', '문 표시'], ['vwin', '창문 표시'], ['stack', '소품 위에 올리기'], ['touchSafe', '터치: 선택 후 이동']];
+$('ddm').append(h('div', { class: 'ddb' },
+  h('button', { id: 'ddacct', type: 'button', class: 'b', onclick: () => { $('dd').open = false; if (Cloud.user) { showTab('file'); if (mq.matches) setSheet('half'); } else gLogin(); } }, '☁ 로그인'),
+  h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; saveFile(fname('3D.png'), shot3D(), 'image/png'); } }, '📷 3D 화면 저장'),
+  h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; saveFile(fname('평면도.png'), planCanvas(), 'image/png'); } }, '🗺 평면도 저장')));
 $('ddm').append(...TBK.map(([k, n]) => { const i = h('input', { type: 'checkbox', 'data-k': k }); i.onchange = () => { PREF[k] = i.checked ? 1 : 0; savePref(); onPref(k); }; return h('label', {}, i, ' ' + n); }));
+$('dd').addEventListener('toggle', () => { const m = $('ddm'); m.style.left = ''; m.style.right = ''; if (!$('dd').open || mq.matches) return; requestAnimationFrame(() => { const r = m.getBoundingClientRect(); if (r.right > innerWidth - 8) { m.style.left = 'auto'; m.style.right = '0'; } }); });
+document.addEventListener('pointerdown', e => { const d = $('dd'); if (d.open && !d.contains(e.target)) d.open = false; });
 function syncTb() { document.querySelectorAll('#ddm input').forEach(i => { i.checked = !!PREF[i.dataset.k]; }); }
 function onPref(k) {
   if (k === 'handles' || k === 'shapeEdit') buildHandles(); else if (k === 'labels') items.forEach(mk); else if (k === 'ceil') roomG.children.forEach(c => { if (c.userData.ceil) c.visible = !!PREF.ceil; });
@@ -1579,6 +1598,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   showTab(PREF.tab === 'sel' ? 'add' : PREF.tab || 'add');
   openProject(cur); view('door');
   if (mq.matches) setSheet('peek');
-  Cloud.on(u => onLogin(u)); Cloud.init(); renderAccount(); setSync('local');
+  const linked = takeCfgFromURL(); Cloud.on(u => { onLogin(u); renderAccount(); }); Cloud.init();
+  if (linked) setTimeout(() => { toast(Cloud.enabled ? '✅ 이 기기에 클라우드 연결을 적용했습니다 — Google 로그인을 누르세요' : '연결 링크를 읽었지만 연결하지 못했습니다: ' + Cloud.error, 7000); showTab('file'); if (mq.matches) setSheet('half'); }, 700); renderAccount(); setSync('local');
 })();
 (function loop() { requestAnimationFrame(loop); ctl.update(); renderer.render(scene, cam); })();

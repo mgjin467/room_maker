@@ -4,18 +4,38 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
 
+import FILE_CFG from './firebase.config.js';
+
 const env = import.meta.env || {};
+const F = FILE_CFG || {};
 export const DEFAULT_CFG = {
-  apiKey: env.VITE_FIREBASE_API_KEY || '',
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0312895786',
-  appId: env.VITE_FIREBASE_APP_ID || '',
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  databaseId: env.VITE_FIREBASE_DATABASE_ID || 'room-maker',
+  apiKey: env.VITE_FIREBASE_API_KEY || F.apiKey || '',
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || F.authDomain || '',
+  projectId: env.VITE_FIREBASE_PROJECT_ID || F.projectId || 'gen-lang-client-0312895786',
+  appId: env.VITE_FIREBASE_APP_ID || F.appId || '',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || F.storageBucket || '',
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || F.messagingSenderId || '',
+  databaseId: env.VITE_FIREBASE_DATABASE_ID || F.databaseId || 'room-maker',
 };
+// 앱에 내장된 설정이 있는지 (있으면 어느 기기에서든 바로 로그인 가능)
+export const BUILTIN = !!(DEFAULT_CFG.apiKey && DEFAULT_CFG.appId);
 const K = 'room3d.v2.firebase';
 export function loadCfg() { let c = {}; try { c = JSON.parse(localStorage.getItem(K) || '{}'); } catch (e) { } const m = { ...DEFAULT_CFG }; Object.keys(c).forEach(k => { if (c[k]) m[k] = c[k]; }); if (!m.authDomain && m.projectId) m.authDomain = m.projectId + '.firebaseapp.com'; return m; }
+// ── 다른 기기 연결 링크: https://…/#fb=<base64url(JSON)> ──
+const b64e = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64d = s => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
+const PUB = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'databaseId'];
+export function cfgLink(c) { const o = {}; PUB.forEach(k => { if (c[k]) o[k] = c[k]; }); return location.origin + location.pathname + '#fb=' + b64e(JSON.stringify(o)); }
+export function takeCfgFromURL() {
+  const m = /[#&]fb=([A-Za-z0-9_-]+)/.exec(location.hash); if (!m) return false;
+  try { const o = JSON.parse(b64d(m[1])); if (!o.apiKey || !o.appId) return false; const c = {}; PUB.forEach(k => { if (o[k]) c[k] = String(o[k]); }); saveCfg(c); return true; }
+  catch (e) { return false; }
+  finally { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { } }
+}
+export function cfgFileCode(c) {
+  const q = v => JSON.stringify(v || '').replace(/^"|"$/g, "'");
+  return `// Firebase 웹 앱 설정 (공개용 값 · AI 키는 넣지 마세요)\nexport default {\n${PUB.map(k => `  ${k}: ${q(c[k])},`).join('\n')}\n};\n`;
+}
 export function saveCfg(c) { try { localStorage.setItem(K, JSON.stringify(c)); } catch (e) { } }
 // Firebase 콘솔의 "const firebaseConfig = {...}" 코드나 JSON을 그대로 붙여 넣어도 읽어 들임
 export function parseCfg(text) {

@@ -57,3 +57,15 @@ AI 탭 → ⚙ AI 설정 → 키 입력(또는 `geminiApiKey, AIza…` 형식 �
 
 ## 구조
 `src/main.js` 핵심 · `src/aiui.js` AI 화면 · `src/ai.js` AI 호출 · `src/cloud.js` Firebase · `src/geom.js` 방 도형 · `src/builders.js` 가구 모델 · `src/fixtures.js` 창호·조명 · `src/materials.js` 재질·풍경 · `src/plan.js` 평면도 · `src/save.js` 파일 저장 · `src/catalog.js` 카탈로그
+
+## 모든 기기에서 바로 로그인 (Firebase 설정 내장)
+
+Firebase 웹 설정(apiKey, appId 등)은 **공개용 값**이라 앱에 넣어도 됩니다. (보안은 Firestore 규칙 + Authentication 「승인된 도메인」이 담당)
+한 번 넣어 두면 PC·휴대폰 어디서든 처음부터 「Google 로그인」 버튼이 보이고, 로그인하면 그 계정의 프로젝트·내 가구·AI 키가 자동으로 적용됩니다.
+
+방법 (셋 중 하나):
+1. **src/firebase.config.js** 에 값 붙여 넣고 재배포 — 설정된 PC에서 저장 탭 → 「Firebase 설정 변경 · 설정 파일 코드」 → 「설정 파일 코드 복사」로 파일 내용을 그대로 복사할 수 있음
+2. **Vercel 환경변수** `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_APP_ID` … (.env.example 참고) 후 재배포
+3. 재배포 없이 바로: 설정된 PC 저장 탭 → **「📱 다른 기기 연결 (QR)」** → 휴대폰 카메라로 QR 찍기
+
+※ AI API 키는 절대 firebase.config.js 에 넣지 마세요. 로그인 후 ⚙ AI 설정에서 저장하면 클라우드(users/{uid}/meta/aikeys)에 저장되어 다른 기기에서 로그인 시 자동으로 불러옵니다.

@@ -204,3 +204,25 @@ body.mob .f.c3{grid-column:span 2}
 #qbrot .rotw{margin:4px 0 0;max-width:min(440px,calc(100vw - 40px))}
 .chatlog{overflow-wrap:anywhere}
 #qb{z-index:6}
+/* ☰ 메뉴 상단 버튼 */
+.ddb{display:flex;flex-direction:column;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+.ddb button{text-align:left;border-radius:8px!important;border:1px solid var(--bd)!important;padding:8px 10px!important;font-size:13px}
+#tb .ddb button.b{background:var(--ac);color:#fff;border-color:var(--ac)!important}
+#ddm{max-height:calc(100dvh - 90px);overflow-y:auto;overscroll-behavior:contain}
+/* 모바일 상단 툴바: 한 줄에 맞추고, 메뉴는 화면 안쪽에 고정 */
+body.mob #tb{flex-wrap:nowrap;gap:4px;left:8px;right:8px;align-items:center}
+body.mob #tb .grp.vsel{flex:1 1 0;min-width:70px;max-width:150px;width:auto}
+body.mob #tb .grp{flex:none}
+body.mob #tb button,body.mob #tb summary{padding:6px 8px;min-width:36px}
+body.mob #shot{display:none}
+body.mob #tb .menu{position:static}
+body.mob #ddm{position:fixed;top:calc(58px + env(safe-area-inset-top,0px));right:8px;left:auto;width:min(300px,calc(100vw - 16px));min-width:0;max-height:calc(100dvh - var(--sh,40vh) - 76px - env(safe-area-inset-top,0px));z-index:30}
+body.mob #ddm label{white-space:normal;font-size:14px;padding:3px 0}
+body.mob #tb #sync{flex:none;pointer-events:auto}
+/* 로그인 영역 */
+.box.login .big{font-size:15px;padding:10px 16px}
+.b.dis{opacity:.55}
+.steps{margin:6px 0 8px;padding-left:20px;display:flex;flex-direction:column;gap:6px;line-height:1.45}
+.qrw{display:flex;justify-content:center;padding:6px 0 10px}.qr{width:min(260px,70vw);height:auto;image-rendering:pixelated;background:#fff;padding:8px;border-radius:10px}
+#tb details.menu{display:block;margin-top:0}
+#tb details.menu>summary{display:flex;align-items:center;justify-content:center;box-sizing:border-box;line-height:1.2;padding-top:6px;padding-bottom:6px}

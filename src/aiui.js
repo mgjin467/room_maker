@@ -1,6 +1,7 @@
 // AI 기능 UI: 대화 명령 · 사진 인식(가구/사람/방) · 실사 렌더 · 설정(키·모델) · 갤러리
 import { PROVIDERS, TASKS, DEFAULT_MODELS, parseKeys, aiText, aiImage, parseJSON, listModels, fileToDataURL, coverResize } from './ai.js';
-import { Cloud, parseCfg, saveCfg, loadCfg, RULES } from './cloud.js';
+import { Cloud, parseCfg, saveCfg, loadCfg, RULES, cfgLink, cfgFileCode, BUILTIN } from './cloud.js';
+import qrcode from 'qrcode-generator';
 import { cropFace, centerBox, sampleSkin } from './faces.js';
 
 const K_KEYS = 'room3d.v2.aikeys', K_MODELS = 'room3d.v2.aimodels', K_EXTRA = 'room3d.v2.aiextra', K_CHAT = 'room3d.v2.chat';
@@ -384,6 +385,23 @@ ${sceneText(viewKey)}`;
     const c = parseCfg(text || ''); if (!c.apiKey || !c.appId) return toast('apiKey 와 appId 를 찾지 못했습니다. firebaseConfig 코드를 그대로 붙여 넣어 주세요.', 6000);
     const cur = loadCfg(); saveCfg({ ...cur, ...c, databaseId: c.databaseId || cur.databaseId || 'room-maker' }); toast('저장했습니다. 다시 불러옵니다…'); setTimeout(() => location.reload(), 600);
   }
+  const copy = (t, msg) => { const ok = () => toast(msg || '복사했습니다'); if (navigator.clipboard) navigator.clipboard.writeText(t).then(ok, () => prompt('아래 내용을 길게 눌러 복사하세요', t)); else prompt('아래 내용을 복사하세요', t); };
+  // 다른 기기(휴대폰) 연결: QR 코드 + 링크 (Firebase 공개 웹 설정만 담김, AI 키·비밀번호는 포함 안 됨)
+  function openLink() {
+    const c = loadCfg(); if (!c.apiKey || !c.appId) return toast('이 기기에 먼저 Firebase 설정이 있어야 합니다', 5000);
+    const url = cfgLink(c), qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+    const img = h('img', { class: 'qr', alt: '연결 QR 코드', src: qr.createDataURL(6, 2) });
+    modal('📱 다른 기기에서 로그인 연결', h('div', {},
+      h('p', { class: 'sm' }, '휴대폰 카메라로 QR 코드를 찍어 열면, 그 기기에도 클라우드 연결 설정이 자동으로 들어가고 바로 「Google 로그인」 버튼이 나타납니다.'),
+      h('div', { class: 'qrw' }, img),
+      h('div', { class: 'r' }, BTN('링크 복사', () => copy(url, '연결 링크를 복사했습니다 — 휴대폰으로 보내서 여세요'), 'b'), navigator.share ? BTN('공유…', () => navigator.share({ title: '방 가구 배치 3D 연결', url }).catch(() => { })) : null),
+      h('p', { class: 'mu sm' }, '※ 링크에는 Firebase 공개 웹 설정만 담기며 AI 키·비밀번호는 들어 있지 않습니다. AI 키는 로그인하면 클라우드에서 자동으로 불러옵니다.'),
+      BUILTIN ? null : h('details', {}, h('summary', {}, '매번 하기 싫다면: 앱에 설정 내장 (1회)'),
+        h('p', { class: 'sm' }, '아래 코드를 프로젝트의 src/firebase.config.js 파일에 통째로 덮어쓰고 다시 배포(Vercel)하면, 모든 기기에서 처음부터 로그인 버튼이 보입니다.'),
+        h('pre', { class: 'pre' }, cfgFileCode(c)), h('div', { class: 'r' }, BTN('설정 파일 코드 복사', () => copy(cfgFileCode(c), 'firebase.config.js 내용을 복사했습니다'), 'b')))
+    ), {});
+  }
+  function copyCfgFile() { copy(cfgFileCode(loadCfg()), 'firebase.config.js 내용을 복사했습니다'); }
   function copyRules() {
     navigator.clipboard && navigator.clipboard.writeText(RULES).catch(() => { });
     modal('Firestore 보안 규칙 (room-maker)', h('div', {}, h('p', { class: 'sm' }, 'Firebase 콘솔 → Firestore → room-maker → 규칙 탭에 아래 내용을 붙여 넣고 ‘게시’를 누르세요. (클립보드에 복사됨)'), h('pre', { class: 'pre' }, RULES)));
@@ -397,5 +415,5 @@ ${sceneText(viewKey)}`;
       saveLocal(); if (!document.getElementById('t-ai').hidden) render();
     } catch (e) { toast('AI 설정 동기화 실패: ' + e.message); }
   }
-  return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace };
+  return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace, openLink, copyCfgFile };
 }
