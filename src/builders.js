@@ -553,8 +553,16 @@ function buildPerson(it, w) {
   C(0, shY - 1, 0, H * 0.026, H * 0.028, H * 0.04, SK, { seg: 12 });
   const hy = topY - hr * 1.1;
   S(0, hy, 0, hr * 0.92, SK, { sy: 1.15, ws: 20, hs: 14 });
-  const hs = it.hs || (sex === 'f' ? 'long' : 'short');
-  if (hs !== 'bald') S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, tl: Math.PI * 0.55, ws: 20, hs: 10 });
+  const hs = it.hs || (sex === 'f' ? 'long' : 'short'), face = !!it.face;
+  // 얼굴 사진: 머리 앞면(약 110°×105°)에 텍스처
+  if (face) S(0, hy, 0, hr * 0.92 * 1.015, null, { sy: 1.15, ws: 24, hs: 18, phs: Math.PI / 2 - 0.95, phl: 1.9, ths: 0.28, tl: 1.9, tex: 'face' });
+  if (hs !== 'bald') {
+    if (face) { S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, ws: 20, hs: 10, phs: Math.PI / 2 + 0.95, phl: Math.PI * 2 - 1.9, tl: Math.PI * 0.6 }); S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, ws: 20, hs: 6, tl: Math.PI * 0.13 }); }
+    else S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, tl: Math.PI * 0.55, ws: 20, hs: 10 });
+  }
+  if (it.glasses) { const gz = hr * 0.92 * 0.97, gy = hy + hr * 0.1, gr2 = hr * 0.2, gc = it.glassC || 0x2b2b2d; [-1, 1].forEach(k => T(k * hr * 0.33, gy, gz, gr2, Math.max(0.15, hr * 0.03), gc, { ts: 20 })); B(0, gy - hr * 0.02, gz, hr * 0.26, hr * 0.04, hr * 0.04, gc); }
+  if (it.flower && of !== 'gown') S(-sw * 0.5, shY - H * 0.09, sw * 0.56, H * 0.017, 0xffffff, { ws: 10, hs: 8 });
+  if (it.bouquet) { const bz = sw * 0.55 + H * 0.05, by = hipY + H * 0.06; Stick(0, by - H * 0.08, bz - H * 0.01, 0, by, bz, H * 0.008, H * 0.01, 0x6b8f4a); S(0, by + H * 0.02, bz, H * 0.055, 0xfaf7f2, { sy: 0.85, ws: 14, hs: 10 }); [[-1, 0], [1, 0.3], [0.2, -1]].forEach(([a, b2]) => S(a * H * 0.03, by + H * 0.04, bz + b2 * H * 0.02, H * 0.018, 0xf2c6cf, { ws: 8, hs: 6 })); }
   if (hs === 'long') B(0, shY - H * 0.06, -hr * 0.55, hr * 1.7, hy - shY + H * 0.06, hr * 0.7, HR);
   if (hs === 'bob') B(0, hy - hr * 0.9, -hr * 0.3, hr * 2, hr * 1.1, hr * 1.2, HR);
   if (hs === 'bun') S(0, hy + hr * 0.6, -hr * 0.75, hr * 0.45, HR);

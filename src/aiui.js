@@ -1,6 +1,7 @@
 // AI 기능 UI: 대화 명령 · 사진 인식(가구/사람/방) · 실사 렌더 · 설정(키·모델) · 갤러리
 import { PROVIDERS, TASKS, DEFAULT_MODELS, parseKeys, aiText, aiImage, parseJSON, listModels, fileToDataURL, coverResize } from './ai.js';
 import { Cloud, parseCfg, saveCfg, loadCfg, RULES } from './cloud.js';
+import { cropFace, centerBox } from './faces.js';
 
 const K_KEYS = 'room3d.v2.aikeys', K_MODELS = 'room3d.v2.aimodels', K_EXTRA = 'room3d.v2.aiextra', K_CHAT = 'room3d.v2.chat';
 const ASPECTS = [['1:1', 1], ['2:3', 2 / 3], ['3:2', 1.5], ['3:4', 0.75], ['4:3', 4 / 3], ['4:5', 0.8], ['5:4', 1.25], ['9:16', 9 / 16], ['16:9', 16 / 9], ['21:9', 21 / 9]];
@@ -93,6 +94,7 @@ actions 종류:
 열 패턴(cpat, 열마다 한 글자): \n${colList()}
 사람(person): sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, 기본 키 남180 여165 어린이120.
 카탈로그(preset 이름으로 쓰면 크기·모양이 자동 적용):\n${catalogNames()}
+잠금: 상태에서 lock:true 인 가구·창호·조명과 room.locked 인 방은 위치·크기·모양을 바꾸거나 삭제하지 마세요(조명 켜기·밝기·색온도, 문·창 열고 닫기, 커튼은 가능). 사용자가 잠금/고정을 요청하면 set에 "lock":1, 해제는 "lock":0 (방은 room set의 "lock").
 질문·분석(동선, 견적, 스타일 조언)만 요청하면 actions는 빈 배열. 모호하면 합리적으로 가정하고 reply에 밝히세요. 색은 반드시 #hex.`;
   }
   const FURN_SYS = () => `당신은 가구 상품 사진/상세페이지를 읽고 3D 배치용 데이터로 바꾸는 전문가입니다. JSON 객체 하나만 출력.
@@ -102,8 +104,8 @@ actions 종류:
 모델키: ${typeList()}
 재질키: ${A.MATS.map(m => m[0]).filter(Boolean).join(', ')}
 열 패턴: \n${colList()}`;
-  const PEOPLE_SYS = () => `사진 속 사람을 왼쪽부터 한 명씩 모두 찾아 3D 마네킹 데이터로 만듭니다. 얼굴·신원은 추정하지 말고 옷차림·색만 기록. JSON 하나만:
-{"people":[{"label":"왼쪽 1번째 · 남성 정장","sex":"m|f|c","rel_height":사진속상대키(가장 큰 사람=1.0),"outfit":"${A.OUTFITS.map(o => o[0]).join('|')}","top":"#hex 상의/드레스/저고리","bottom":"#hex 하의/치마","shoes":"#hex","skin":"#hex","hair":"#hex","hs":"short|long|bun|bob|bald","veil":true|false,"pose":"stand|sit"}]}`;
+  const PEOPLE_SYS = () => `사진 속 사람을 왼쪽부터 한 명씩 모두 찾아 3D 인물 모델 데이터로 만듭니다. 누구인지(신원·이름)는 추정하지 말고, 얼굴 위치와 외형(옷차림·색·머리·안경·소품)만 기록합니다. JSON 하나만:
+{"people":[{"label":"왼쪽 1번째 · 남성 정장","img":사진번호(0부터),"face_box":[ymin,xmin,ymax,xmax](얼굴 영역, 이마~턱·양 귀, 사진 크기 기준 0~1000 정규화 정수),"sex":"m|f|c","rel_height":사진속상대키(가장 큰 사람=1.0),"glasses":true|false,"tie":"#hex 넥타이색(없으면 생략)","flower":가슴꽃 여부,"bouquet":부케 여부,"outfit":"${A.OUTFITS.map(o => o[0]).join('|')}","top":"#hex 상의/드레스/저고리","bottom":"#hex 하의/치마","shoes":"#hex","skin":"#hex","hair":"#hex","hs":"short|long|bun|bob|bald","veil":true|false,"pose":"stand|sit"}]}`;
   const ROOM_SYS = () => `방 사진 또는 평면도(도면) 이미지를 분석해 방 크기·창호·가구를 추출합니다. 치수가 표기되어 있으면(mm→cm) 사용, 없으면 일반적인 한국 아파트 기준으로 추정. JSON 하나만:
 {"room":{"W":가로,"D":깊이,"H":천장높이,"shape":"rect|L|Lr|T|U|cham|trap"},"openings":[{"kind":"win|door","st":"창:${A.WIN_ST.map(s => s[0]).join('|')} 문:${A.DOOR_ST.map(s => s[0]).join('|')}","wall":"벽1(뒷벽)|벽2(오른쪽)|벽3(앞벽)|벽4(왼쪽)","s":방안에서 벽을 볼때 왼쪽끝에서 창호중심,"w":,"h":,"y":}],"items":[{"name":"","type":"모델키","w":,"d":,"h":,"x":왼쪽에서중심,"z":뒤에서중심,"rot":0,"color":"#hex","mat":""}],"note":"추정 근거"}
 모델키: ${typeList()}`;
@@ -201,7 +203,7 @@ actions 종류:
         const out = await aiText({ ...m, system: sys, prompt: mode === 'furniture' ? '사진 속 가구/소품을 모두 추출하세요. 치수표를 꼼꼼히 읽으세요.' : mode === 'people' ? '사진 속 모든 사람을 왼쪽부터 추출하세요.' : '방/도면을 분석하세요.', images: imgs, json: true });
         result = parseJSON(out);
         if (mode === 'furniture') (result.items || []).forEach(it => { it._on = true; it._v = -1; });
-        if (mode === 'people') (result.people || []).forEach(p => { p._on = true; p.height = p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180; });
+        if (mode === 'people') { for (const p of (result.people || [])) { p._on = true; p._faceOn = true; p._adj = { dx: 0, dy: 0, s: 1 }; p.height = p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180; const src = imgs[Math.min(imgs.length - 1, Math.max(0, p.img | 0))]; p._src = src; if (Array.isArray(p.face_box) && p.face_box.length === 4) { try { p.face = await cropFace(src, p.face_box, p._adj); } catch (e) { } } } }
       } catch (err) { toast('⚠ ' + err.message, 7000); }
       draw();
     };
@@ -227,7 +229,10 @@ actions 종류:
           h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: ratio, onchange: e => { ratio = e.target.checked; recalc(); } }), '사진 속 키 비율 반영 (기준: 남 180 / 여 165)'),
           ...list.map(p => h('div', { class: 'rc' },
             h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: p._on, onchange: e => { p._on = e.target.checked; } }), h('b', {}, p.label || '사람')),
-            h('div', { class: 'sw' }, ['top', 'bottom', 'shoes', 'skin', 'hair'].map(k => h('span', { class: 'swb', title: k, style: `background:${p[k] || '#888'}` }))),
+            h('div', { class: 'pface' }, p.face ? faceAdjuster(p) : h('span', { class: 'mu sm' }, '얼굴 위치를 찾지 못했습니다'),
+              h('div', {}, h('div', { class: 'sw' }, ['top', 'bottom', 'shoes', 'skin', 'hair'].map(k => h('span', { class: 'swb', title: k, style: `background:${p[k] || '#888'}` }))),
+                p.face ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: p._faceOn, onchange: e => { p._faceOn = e.target.checked; } }), '얼굴 사진 입히기') : null,
+                h('div', { class: 'cg' }, ...[['glasses', '안경'], ['flower', '가슴꽃'], ['bouquet', '부케'], ['veil', '면사포']].map(([k, t]) => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: !!p[k], onchange: e => { p[k] = e.target.checked; } }), t))))),
             G(4, F('성별', (() => { const s = h('select', {}, [['m', '남성'], ['f', '여성'], ['c', '어린이']].map(([v, t]) => h('option', { value: v }, t))); s.value = p.sex || 'm'; s.onchange = () => { p.sex = s.value; }; return s; })()), F('옷', (() => { const s = h('select', {}, A.OUTFITS.map(([v, t]) => h('option', { value: v }, t))); s.value = p.outfit || 'casual'; s.onchange = () => { p.outfit = s.value; }; return s; })()), F('키 (cm)', h('input', { type: 'number', inputmode: 'decimal', value: p.height, oninput: e => { p.height = +e.target.value; } })), F('이름', h('input', { type: 'text', value: p.name || '', placeholder: '예: 신랑', oninput: e => { p.name = e.target.value; } }))),
             h('div', { class: 'r' }, BTN('배치에 추가', () => addPeople([p]), 'c'), BTN('사람 목록(내 가구)에 저장', () => addPeople([p], true), 'c')))),
           h('div', { class: 'r' }, BTN('선택한 사람 모두 배치에 추가', () => addPeople(list.filter(x => x._on)), 'b'), BTN('모두 내 가구에 저장', () => addPeople(list.filter(x => x._on), true))));
@@ -246,7 +251,39 @@ actions 종류:
   function personSpec(p) {
     const H = +p.height || (p.sex === 'f' ? 165 : 180), of = p.outfit || 'casual', f = H / (p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180);
     const [w, d] = of === 'gown' ? [102, 102] : of === 'hanbok' ? [80, 80] : p.sex === 'f' ? [48, 30] : p.sex === 'c' ? [38, 24] : [58, 32];
-    return { name: p.name || p.label || '사람', type: 'person', w: Math.round(w * f), d: Math.round(d * f), h: H, color: p.top || '#3a3d42', c2: p.bottom || p.top || '#3a3d42', sex: p.sex || 'm', outfit: of, skin: p.skin, hair: p.hair, shoe: p.shoes, hs: p.hs, veil: p.veil ? 1 : 0, pose: p.pose === 'sit' ? 'sit' : 'stand', nc: 1 };
+    return { name: p.name || p.label || '사람', type: 'person', w: Math.round(w * f), d: Math.round(d * f), h: H, color: p.top || '#3a3d42', c2: p.bottom || p.top || '#3a3d42', sex: p.sex || 'm', outfit: of, skin: p.skin, hair: p.hair, shoe: p.shoes, hs: p.hs, veil: p.veil ? 1 : 0, pose: p.pose === 'sit' ? 'sit' : 'stand', nc: 1, face: p._faceOn !== false && p.face ? p.face : undefined, glasses: p.glasses ? 1 : 0, flower: p.flower ? 1 : 0, bouquet: p.bouquet ? 1 : 0, tie: p.tie || undefined };
+  }
+  // 얼굴 미리보기 + 위치·크기 미세 조정 (p: { _src, face_box, _adj, face })
+  function faceAdjuster(p, onChange) {
+    const img = h('img', { src: p.face, class: 'facethumb' });
+    const nudge = async (dx, dy, ds) => { p._adj = { dx: (p._adj.dx || 0) + dx, dy: (p._adj.dy || 0) + dy, s: Math.max(0.4, Math.min(2.5, (p._adj.s || 1) * ds)) }; p.face = await cropFace(p._src, p.face_box, p._adj); img.src = p.face; onChange && onChange(); };
+    const b = (t, f, tt) => h('button', { class: 'c', type: 'button', title: tt, onclick: f }, t);
+    return h('div', { class: 'fadj' }, img, h('div', { class: 'fpad' },
+      b('↑', () => nudge(0, -1, 1), '위로'), b('↓', () => nudge(0, 1, 1), '아래로'), b('←', () => nudge(-1, 0, 1), '왼쪽'), b('→', () => nudge(1, 0, 1), '오른쪽'), b('＋', () => nudge(0, 0, 0.9), '확대'), b('−', () => nudge(0, 0, 1.1), '축소')));
+  }
+  // 이미 배치된 사람에 얼굴 사진 넣기
+  function openFace(it, done) {
+    const body = h('div', {}), fi = h('input', { type: 'file', accept: 'image/*', hidden: true }), cam = h('input', { type: 'file', accept: 'image/*', capture: 'user', hidden: true });
+    let src = null, faces = [], cur = null;
+    const draw = () => {
+      body.innerHTML = '';
+      app(body, h('p', { class: 'mu sm' }, '얼굴이 잘 보이는 정면 사진을 고르세요. AI 키가 있으면 얼굴 위치를 자동으로 찾고, 여러 명이면 사람을 고를 수 있습니다.'),
+        h('div', { class: 'r' }, BTN('🖼 사진 선택', () => fi.click(), 'b'), A.isMobile() ? BTN('🤳 셀카 촬영', () => cam.click()) : null, fi, cam),
+        faces.length > 1 ? h('div', { class: 'ch' }, faces.map((f, i) => h('button', { class: 'c' + (cur === f ? ' on' : ''), onclick: async () => { cur = f; if (!cur.face) cur.face = await cropFace(src, cur.face_box, cur._adj); draw(); } }, f.label || `${i + 1}번`))) : null,
+        cur && cur.face ? faceAdjuster(cur) : null,
+        cur && cur.face ? h('div', { class: 'r' }, BTN('이 얼굴 적용', () => { it.face = cur.face; done && done(); m.close(); toast('얼굴을 적용했습니다'); }, 'b')) : null);
+    };
+    const pick = async files => {
+      if (!files[0]) return; src = await fileToDataURL(files[0], 1600); faces = []; cur = null;
+      body.querySelector('.r').append(h('span', { class: 'mu sm' }, ' 얼굴 찾는 중…'));
+      const v = modelFor('vision');
+      if (v.key) { try { const j = parseJSON(await aiText({ ...v, system: '사진 속 사람 얼굴 위치를 찾습니다. 신원은 추정하지 않습니다. JSON 하나만: {"faces":[{"label":"왼쪽 1번째 남성","face_box":[ymin,xmin,ymax,xmax] (0~1000 정규화)}]}', prompt: '모든 얼굴을 왼쪽부터 찾으세요.', images: [src], json: true })); faces = (j.faces || []).filter(f => Array.isArray(f.face_box)); } catch (e) { toast('얼굴 자동 찾기 실패: ' + e.message, 5000); } }
+      if (!faces.length) faces = [{ label: '가운데', face_box: centerBox }];
+      faces.forEach(f => { f._src = src; f._adj = { dx: 0, dy: 0, s: 1 }; });
+      cur = faces[0]; cur.face = await cropFace(src, cur.face_box, cur._adj); draw();
+    };
+    fi.onchange = () => { pick(fi.files); fi.value = ''; }; cam.onchange = () => { pick(cam.files); cam.value = ''; };
+    draw(); const m = modal('📷 얼굴 사진 넣기 — ' + (it.name || '사람'), body); return m;
   }
   function addPeople(list, save) {
     const R = A.R, n = list.length;
@@ -360,5 +397,5 @@ ${sceneText(viewKey)}`;
       saveLocal(); if (!document.getElementById('t-ai').hidden) render();
     } catch (e) { toast('AI 설정 동기화 실패: ' + e.message); }
   }
-  return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor };
+  return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace };
 }
