@@ -459,7 +459,7 @@ const BUILD = {
   tlamp: (it, w) => { const { h } = it, m = Math.min(w, it.d); S(0, h * 0.22, 0, m * 0.28, null, { sy: 1.3, ws: 20, hs: 14 }); C(0, h * 0.42, 0, 1, 1, h * 0.14, GD); C(0, h * 0.55, 0, m * 0.36, m / 2, h * 0.45, 'a', { em: 1, seg: 28 }); Lt(0, h * 0.7, 0); },
   uplight: (it, w) => { const { h } = it, m = Math.min(w, it.d); C(0, 0, 0, m * 0.35, m * 0.4, 2.5, null); C(0, 2.5, 0, 1.1, 1.1, h - 14, null); C(0, h - 12, 0, m / 2, m * 0.1, 12, 'a', { em: 1, seg: 28 }); Lt(0, h - 2, 0); },
   plant: (it, w) => buildPlant(it, w),
-  person: (it, w) => buildPerson(it, w),
+  person: it => buildPerson(it),
   vase: (it, w) => { const { h } = it, m = Math.min(w, it.d); S(0, h * 0.35, 0, m / 2, null, { sy: (h * 0.7) / m, ws: 20, hs: 14 }); C(0, h * 0.6, 0, m * 0.16, m * 0.22, h * 0.4, null, { seg: 16 }); },
   basket: (it, w) => { const { d, h } = it; C(0, 0, 0, w / 2, w / 2 * 0.86, h, null, { sz: d / w, seg: 24 }); C(0, h - 0.3, 0, w / 2 - 1.5, w / 2 - 1.5, 0.4, 'd', { sz: d / w, seg: 24 }); T(0, h, 0, w / 2, 0.8, 'd', { rx: PI / 2, sy: d / w }); },
   books: (it, w) => { const { d, h } = it, r = rng(it.id || 1); let y = 0; while (y < h - 1.5) { const bh = 2 + r() * 2.5; B((r() - 0.5) * 3, y, (r() - 0.5) * 2, w * (0.75 + r() * 0.25), Math.min(bh, h - y), d * (0.75 + r() * 0.25), y === 0 ? null : BOOK[(r() * BOOK.length) | 0], { ry: (r() - 0.5) * 0.3 }); y += bh; } },
@@ -511,63 +511,129 @@ const BUILD = {
   },
 };
 
-export const OUTFITS = [['suit', '정장'], ['casual', '캐주얼'], ['tshirt', '티셔츠·반바지'], ['dress', '원피스'], ['gown', '웨딩드레스'], ['hanbok', '한복 (치마)'], ['hanbokM', '한복 (바지)'], ['coat', '코트']];
-export const HAIRS = [['short', '짧은 머리'], ['long', '긴 머리'], ['bun', '올림머리'], ['bob', '단발'], ['bald', '민머리']];
-function buildPerson(it, w) {
-  const H = it.h, sex = it.sex || 'm', ch = sex === 'c', of = it.outfit || (sex === 'f' ? 'dress' : 'suit'), sit = it.pose === 'sit';
-  const SK = it.skin || '#e8c4a2', HR = it.hair || '#2a2220', SH = it.shoe || '#1d1d1f', TOP = null, BOT = 'a';
-  const hd = ch ? H / 6 : H / 7.6, hr = hd * 0.5, sw = (sex === 'm' ? 0.125 : 0.11) * H, hw = (sex === 'm' ? 0.085 : 0.095) * H;
+export const OUTFITS = [['suit', '정장'], ['suit3', '쓰리피스 정장'], ['tux', '턱시도'], ['casual', '셔츠+바지'], ['tshirt', '티셔츠+반바지'], ['hoodie', '후드티'], ['knit', '니트+바지'], ['sport', '트레이닝복'], ['coat', '롱코트'], ['blouse', '블라우스+치마'], ['dress', '원피스'], ['longdress', '롱드레스'], ['gown', '웨딩드레스'], ['mermaid', '머메이드 드레스'], ['hanbok', '한복 (치마)'], ['hanbokM', '한복 (바지)']];
+export const HAIRS = [['short', '짧은 머리'], ['crew', '스포츠'], ['part', '가르마'], ['twoblock', '투블럭'], ['pixie', '숏컷'], ['bob', '단발'], ['long', '긴 생머리'], ['wavy', '긴 웨이브'], ['pony', '포니테일'], ['bun', '올림머리'], ['lowbun', '낮은 쪽머리'], ['curly', '곱슬'], ['bald', '민머리']];
+export const SLEEVES = [['', '옷에 맞춤'], ['long', '긴팔'], ['short', '반팔'], ['none', '민소매']];
+export const TIES = [['', '옷에 맞춤'], ['none', '없음'], ['tie', '넥타이'], ['bow', '나비넥타이']];
+// 자세 프리셋: a=팔 들기(°, 음수=뒤로) · z=팔 방향(0 앞 ~ 90 옆) · e=팔꿈치 굽힘 · leg=걷기 보폭 · sit=앉기
+export const POSES = {
+  stand: ['서 있기', { aL: 8, aR: 8, zL: 80, zR: 80, eL: 12, eR: 12, leg: 0, sit: 0 }],
+  attn: ['차렷', { aL: 3, aR: 3, zL: 90, zR: 90, eL: 0, eR: 0, leg: 0, sit: 0 }],
+  walk: ['걷기', { aL: 22, aR: -22, zL: 0, zR: 0, eL: 20, eR: 10, leg: 0.7, sit: 0 }],
+  wave: ['손 흔들기', { aL: 8, aR: 150, zL: 80, zR: 60, eL: 10, eR: 35, leg: 0, sit: 0 }],
+  hold: ['두 손 모으기', { aL: 22, aR: 22, zL: 20, zR: 20, eL: 75, eR: 75, leg: 0, sit: 0 }],
+  cross: ['팔짱', { aL: 28, aR: 28, zL: 5, zR: 5, eL: 125, eR: 125, leg: 0, sit: 0 }],
+  hips: ['허리에 손', { aL: 38, aR: 38, zL: 95, zR: 95, eL: 115, eR: 115, leg: 0, sit: 0 }],
+  point: ['가리키기', { aL: 8, aR: 85, zL: 80, zR: 5, eL: 12, eR: 0, leg: 0, sit: 0 }],
+  cheer: ['만세', { aL: 165, aR: 165, zL: 70, zR: 70, eL: 10, eR: 10, leg: 0, sit: 0 }],
+  sit: ['앉기', { aL: 22, aR: 22, zL: 15, zR: 15, eL: 55, eR: 55, leg: 0, sit: 1 }],
+  sitW: ['앉아서 손 흔들기', { aL: 22, aR: 140, zL: 15, zR: 60, eL: 55, eR: 35, leg: 0, sit: 1 }],
+};
+const SKIRTL = { blouse: 0.5, dress: 0.55, longdress: 0.97, gown: 1, mermaid: 1, hanbok: 1 };
+const PANTS = new Set(['suit', 'suit3', 'tux', 'casual', 'hoodie', 'knit', 'sport', 'coat', 'hanbokM']);
+function buildPerson(it) {
+  const H = it.h, sex = it.sex || 'm', ch = sex === 'c', of = it.outfit || (sex === 'f' ? 'dress' : 'suit');
+  const pz = (POSES[it.pose] || POSES.stand)[1], v = k => (it[k] ?? pz[k] ?? 0), sit = !!v('sit');
+  const SK = it.skin || '#e8c4a2', HRc = it.hair || '#2a2220', SH = it.shoe || '#1d1d1f', TOP = null, BOT = 'a';
+  const C3 = it.c3 || ({ suit3: '#8a7c66', hanbok: '#b23a48', sport: '#ffffff', hoodie: '#f2f2f2', hanbokM: '#6b5a45' }[of] || '#f7f7f5');
+  const bs = it.build || 1, shw = it.shw || 1, hs0 = it.headS || 1;
+  const hd = ch ? H / 6 : H / 7.6, hr = hd * 0.5 * hs0, sw = (sex === 'm' ? 0.125 : 0.11) * H * shw, hw = (sex === 'm' ? 0.085 : 0.095) * H * Math.sqrt(bs);
   const hip0 = H * 0.52, dy = sit ? (H * 0.27 - hip0) : 0, hipY = hip0 + dy, shY = H * 0.815 + dy, topY = H + dy;
-  const lr = H * 0.034, lx = hw * 0.55, skirt = of === 'dress' || of === 'gown' || of === 'hanbok';
-  // 다리·신발
+  const lr = H * 0.034 * Math.sqrt(bs), lx = hw * 0.55, skirt = SKIRTL[of] != null, pants = PANTS.has(of), shorts = of === 'tshirt';
+  const slv = it.sleeve || ({ tshirt: 'short', gown: 'none', dress: 'short', mermaid: 'none', longdress: 'none' }[of] || 'long');
+  const tieT = it.tieT || ({ suit: 'tie', suit3: 'tie', coat: 'tie', tux: 'bow' }[of] || 'none');
+  const skL = it.skirtL ?? SKIRTL[of] ?? 0.55, fullSkirt = skirt && skL >= 0.93;
+  const zf = sw * 0.55 * bs;
+  // 다리
   if (sit) {
-    [-1, 1].forEach(s => { Stick(s * lx, hipY, 0, s * lx, hipY, H * 0.24, lr, lr * 0.9, skirt ? SK : BOT); Stick(s * lx, hipY, H * 0.24, s * lx, H * 0.05, H * 0.25, lr * 0.85, lr * 0.7, of === 'tshirt' || of === 'dress' ? SK : BOT); B(s * lx, 0, H * 0.28, H * 0.045, H * 0.045, H * 0.11, SH); });
-  } else if (of !== 'gown' && of !== 'hanbok') {
-    [-1, 1].forEach(s => {
-      const pants = of === 'dress' ? SK : BOT, knee = H * 0.28;
-      Stick(s * lx, H * 0.045, 0, s * lx, knee, 0, lr * 0.75, lr * 0.85, of === 'tshirt' || of === 'dress' ? SK : pants);
-      Stick(s * lx, knee, 0, s * lx * 1.05, hipY, 0, lr * 0.85, lr, of === 'dress' ? SK : pants);
-      B(s * lx, 0, H * 0.02, H * 0.045, H * 0.045, H * 0.11, SH);
+    [-1, 1].forEach(k => { const up = skirt ? SK : BOT; Stick(k * lx, hipY, 0, k * lx, hipY, H * 0.24, lr, lr * 0.9, fullSkirt ? TOP : up); Stick(k * lx, hipY, H * 0.24, k * lx, H * 0.05, H * 0.25, lr * 0.85, lr * 0.7, pants ? BOT : SK); B(k * lx, 0, H * 0.28, H * 0.045, H * 0.045, H * 0.11, SH); });
+  } else if (!fullSkirt) {
+    const st0 = v('leg') * 0.42;
+    [-1, 1].forEach(k => {
+      const st = st0 * k, fy = H * 0.045, L = hipY - fy, foot = [k * lx, hipY - Math.cos(st) * L, Math.sin(st) * L], knee = [k * lx * 1.02, (hipY + foot[1]) / 2, foot[2] / 2], wide = of === 'hanbokM' ? 1.6 : 1;
+      Stick(foot[0], foot[1], foot[2], knee[0], knee[1], knee[2], lr * 0.75 * wide, lr * 0.85 * wide, pants ? BOT : SK);
+      Stick(knee[0], knee[1], knee[2], k * lx * 1.05, hipY, 0, lr * 0.85 * wide, lr * wide, pants || shorts ? BOT : SK);
+      if (shorts) Stick(k * lx, (knee[1] + hipY) / 2 - H * 0.03, knee[2] * 0.6, k * lx * 1.05, hipY, 0, lr * 1.12, lr * 1.18, BOT);
+      if (of === 'sport') Stick(foot[0] + k * lr * 0.8, foot[1] + 2, foot[2], k * lx * 1.05 + k * lr * 0.9, hipY - 2, 0, 0.5, 0.5, C3);
+      B(foot[0], 0, foot[2] + H * 0.02, H * 0.045, H * 0.045, H * 0.11, SH, { ry: 0 });
     });
-    if (of === 'tshirt') [-1, 1].forEach(s => Stick(s * lx, H * 0.34, 0, s * lx * 1.05, hipY, 0, lr * 1.12, lr * 1.18, BOT));
   }
-  // 하의(치마)
-  if (of === 'gown') C(0, 0, sit ? H * 0.1 : 0, hw * 1.05, sit ? H * 0.24 : H * 0.31, hipY + H * 0.08, TOP, { seg: 32 });
-  if (of === 'hanbok') C(0, 0, 0, sw * 0.85, H * 0.24, shY - H * 0.07, BOT, { seg: 28 });
-  if (of === 'dress') C(0, sit ? hipY - 2 : H * 0.27, sit ? H * 0.08 : 0, hw * 1.05, hw * 1.75, sit ? H * 0.06 : hipY - H * 0.27 + H * 0.04, TOP, { seg: 24 });
-  if (of === 'coat' && !sit) C(0, H * 0.3, 0, hw * 1.1, hw * 1.45, hipY - H * 0.3 + 2, TOP, { seg: 20 });
+  // 치마·드레스
+  if (skirt) {
+    const col = of === 'blouse' || of === 'hanbok' ? BOT : TOP, topK = of === 'hanbok' ? shY - H * 0.07 : hipY + H * (of === 'blouse' ? 0.05 : 0.08), hemY = Math.max(0, hipY * (1 - skL));
+    const rTop = of === 'hanbok' ? sw * 0.85 : hw * 1.05, rBot = of === 'gown' ? H * 0.31 * (0.4 + 0.6 * skL) : of === 'hanbok' ? H * 0.24 * (0.5 + 0.5 * skL) : of === 'longdress' ? hw * 1.9 : hw * (1.3 + 0.5 * skL);
+    if (sit) { C(0, hipY - 3, H * 0.1, rTop * 1.1, rTop * 1.7, Math.max(4, topK - hipY + 3), col, { seg: 28 }); if (skL > 0.6) C(0, 0, H * 0.2, rTop * 1.6, rBot * 0.85, hipY - 3, col, { seg: 28 }); }
+    else if (of === 'mermaid') { const kY = H * 0.22; C(0, kY, 0, rTop, hw * 0.95, topK - kY, col, { seg: 28 }); C(0, 0, 0, hw * 0.95, H * 0.21, kY, col, { seg: 28 }); }
+    else C(0, hemY, 0, rTop, rBot, topK - hemY, col, { seg: 32 });
+  }
+  if (of === 'coat' && !sit) C(0, H * 0.28, 0, hw * 1.12, hw * 1.5, hipY - H * 0.28 + 2, TOP, { seg: 20 });
   // 상체
-  C(0, hipY, 0, sw * 0.95, hw * 1.05, shY - hipY, of === 'hanbok' ? null : TOP, { sz: 0.55, seg: 20 });
-  if (of === 'hanbok') C(0, shY - H * 0.1, 0, sw * 0.98, sw * 0.9, H * 0.1, TOP, { sz: 0.58, seg: 20 });
-  if (of === 'suit' || of === 'coat') { B(0, shY - H * 0.17, sw * 0.55 * 0.92, sw * 0.42, H * 0.16, 0.6, 0xf7f7f5); B(0, shY - H * 0.17, sw * 0.55 * 0.92 + 0.4, H * 0.016, H * 0.15, 0.4, it.tie || 0x1d1d1f); }
-  if (of === 'gown') C(0, shY - H * 0.04, 0, sw * 0.7, sw * 0.9, H * 0.04, SK, { sz: 0.5, seg: 16 });
-  // 팔
-  const bare = of === 'gown' || of === 'tshirt' || (of === 'dress' && !it.sleeve);
-  [-1, 1].forEach(s => {
-    const ax = s * (sw + H * 0.012), hy = sit ? hipY + H * 0.07 : hipY - H * 0.03, hz = sit ? H * 0.12 : H * 0.02, hx = s * (sw + (sit ? 0 : H * 0.025));
-    Stick(ax, shY - H * 0.02, 0, (ax + hx) / 2, (shY + hy) / 2, hz / 2, H * 0.03, H * 0.027, bare ? SK : TOP);
-    Stick((ax + hx) / 2, (shY + hy) / 2, hz / 2, hx, hy, hz, H * 0.027, H * 0.024, bare || of === 'tshirt' ? SK : TOP);
-    S(hx, hy - H * 0.02, hz, H * 0.024, SK, { sy: 1.4 });
-  });
-  // 목·머리·머리카락
-  C(0, shY - 1, 0, H * 0.026, H * 0.028, H * 0.04, SK, { seg: 12 });
-  const hy = topY - hr * 1.1;
-  S(0, hy, 0, hr * 0.92, SK, { sy: 1.15, ws: 20, hs: 14 });
-  const hs = it.hs || (sex === 'f' ? 'long' : 'short'), face = !!it.face;
-  // 얼굴 사진: 머리 앞면(약 110°×105°)에 텍스처
-  if (face) S(0, hy, 0, hr * 0.92 * 1.015, null, { sy: 1.15, ws: 24, hs: 18, phs: Math.PI / 2 - 0.95, phl: 1.9, ths: 0.28, tl: 1.9, tex: 'face' });
-  if (hs !== 'bald') {
-    if (face) { S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, ws: 20, hs: 10, phs: Math.PI / 2 + 0.95, phl: Math.PI * 2 - 1.9, tl: Math.PI * 0.6 }); S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, ws: 20, hs: 6, tl: Math.PI * 0.13 }); }
-    else S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, tl: Math.PI * 0.55, ws: 20, hs: 10 });
+  C(0, hipY, 0, sw * 0.95, hw * 1.05, shY - hipY, of === 'hanbok' ? SK : TOP, { sz: 0.55 * bs, seg: 20 });
+  if (of === 'hanbok' || of === 'hanbokM') { C(0, shY - H * (of === 'hanbok' ? 0.1 : 0.18), 0, sw * 0.98, sw * 0.9, H * (of === 'hanbok' ? 0.1 : 0.18), TOP, { sz: 0.58 * bs, seg: 20 }); B(sw * 0.22, shY - H * 0.21, zf + 0.5, H * 0.02, H * 0.13, 0.4, C3); B(0, shY - H * 0.04, zf - 0.2, sw * 0.5, H * 0.03, 0.4, 0xffffff, { rz: 0.4 }); }
+  if (of === 'gown' || of === 'mermaid' || (of === 'longdress' && slv === 'none')) C(0, shY - H * 0.04, 0, sw * 0.7, sw * 0.9, H * 0.04, SK, { sz: 0.5, seg: 16 });
+  const jacket = of === 'suit' || of === 'suit3' || of === 'tux' || of === 'coat';
+  if (jacket) {
+    if (of === 'suit3') B(0, hipY + H * 0.04, zf - 0.1, sw * 0.62, shY - hipY - H * 0.1, 0.6, C3);
+    B(0, shY - H * 0.17, zf + 0.3, sw * 0.4, H * 0.16, 0.5, 0xf7f7f5);
+    [-1, 1].forEach(k => B(k * sw * 0.27, shY - H * 0.22, zf + 0.6, sw * 0.16, H * 0.2, 0.4, 'd', { rz: k * 0.28 }));
   }
-  if (it.glasses) { const gz = hr * 0.92 * 0.97, gy = hy + hr * 0.1, gr2 = hr * 0.2, gc = it.glassC || 0x2b2b2d; [-1, 1].forEach(k => T(k * hr * 0.33, gy, gz, gr2, Math.max(0.15, hr * 0.03), gc, { ts: 20 })); B(0, gy - hr * 0.02, gz, hr * 0.26, hr * 0.04, hr * 0.04, gc); }
-  if (it.flower && of !== 'gown') S(-sw * 0.5, shY - H * 0.09, sw * 0.56, H * 0.017, 0xffffff, { ws: 10, hs: 8 });
-  if (it.bouquet) { const bz = sw * 0.55 + H * 0.05, by = hipY + H * 0.06; Stick(0, by - H * 0.08, bz - H * 0.01, 0, by, bz, H * 0.008, H * 0.01, 0x6b8f4a); S(0, by + H * 0.02, bz, H * 0.055, 0xfaf7f2, { sy: 0.85, ws: 14, hs: 10 }); [[-1, 0], [1, 0.3], [0.2, -1]].forEach(([a, b2]) => S(a * H * 0.03, by + H * 0.04, bz + b2 * H * 0.02, H * 0.018, 0xf2c6cf, { ws: 8, hs: 6 })); }
-  if (hs === 'long') B(0, shY - H * 0.06, -hr * 0.55, hr * 1.7, hy - shY + H * 0.06, hr * 0.7, HR);
-  if (hs === 'bob') B(0, hy - hr * 0.9, -hr * 0.3, hr * 2, hr * 1.1, hr * 1.2, HR);
-  if (hs === 'bun') S(0, hy + hr * 0.6, -hr * 0.75, hr * 0.45, HR);
-  if (it.veil) C(0, sit ? hipY : H * 0.2, -hr * 1.4, hr * 0.6, H * 0.2, hy - (sit ? hipY : H * 0.2), 0xffffff, { op: 0.35, seg: 20 });
-  void w; void ch;
+  if (of === 'casual' || of === 'blouse') { B(0, shY - H * 0.03, zf + 0.2, sw * 0.5, H * 0.025, 0.5, 'l'); for (let i = 0; i < 4; i++) S(0, shY - H * (0.07 + i * 0.06), zf + 0.4, H * 0.005, 'd'); }
+  if (of === 'knit') T(0, shY - 0.5, 0, sw * 0.32, H * 0.012, 'd', { rx: PI / 2, sz: 0.6 });
+  if (of === 'hoodie') { T(0, shY + H * 0.005, -sw * 0.25, sw * 0.42, H * 0.03, TOP, { rx: PI / 2.4 }); B(0, hipY + H * 0.04, zf + 0.3, sw * 0.95, H * 0.08, 0.5, 'd'); [-1, 1].forEach(k => B(k * sw * 0.12, shY - H * 0.12, zf + 0.5, 0.5, H * 0.1, 0.4, C3)); }
+  if (of === 'sport') B(0, hipY, zf + 0.3, 0.8, shY - hipY - 1, 0.4, C3);
+  if (tieT === 'tie') { B(0, shY - H * 0.17, zf + 0.6, H * 0.016, H * 0.15, 0.5, it.tie || 0x1d1d1f); B(0, shY - H * 0.03, zf + 0.6, H * 0.022, H * 0.018, 0.6, it.tie || 0x1d1d1f); }
+  if (tieT === 'bow') [-1, 1].forEach(k => B(k * H * 0.012, shY - H * 0.045, zf + 0.7, H * 0.022, H * 0.016, 0.8, it.tie || 0x1d1d1f, { rz: k * 0.35 }));
+  // 팔
+  const hands = [];
+  [1, -1].forEach(k => {
+    const a = v(k > 0 ? 'aL' : 'aR') * PI / 180, az = v(k > 0 ? 'zL' : 'zR') * PI / 180, eb = v(k > 0 ? 'eL' : 'eR') * PI / 180;
+    const S0 = [k * (sw + H * 0.012), shY - H * 0.02, 0], dx = k * Math.sin(az), dz = Math.cos(az);
+    const ud = [dx * Math.sin(a), -Math.cos(a), dz * Math.sin(a)], Lu = H * 0.17, Lf = H * 0.155;
+    const El = [S0[0] + ud[0] * Lu, S0[1] + ud[1] * Lu, S0[2] + ud[2] * Lu];
+    let F = [-k * 0.5, 0.25, 1], fd2 = F[0] * ud[0] + F[1] * ud[1] + F[2] * ud[2], pp = [F[0] - ud[0] * fd2, F[1] - ud[1] * fd2, F[2] - ud[2] * fd2], pl = Math.hypot(...pp) || 1; pp = pp.map(q => q / pl);
+    const fd = [ud[0] * Math.cos(eb) + pp[0] * Math.sin(eb), ud[1] * Math.cos(eb) + pp[1] * Math.sin(eb), ud[2] * Math.cos(eb) + pp[2] * Math.sin(eb)];
+    const Hd = [El[0] + fd[0] * Lf, El[1] + fd[1] * Lf, El[2] + fd[2] * Lf]; hands.push(Hd);
+    const upC = slv === 'none' || of === 'hanbok' && false ? SK : TOP, foC = slv === 'long' ? TOP : SK;
+    Stick(...S0, ...El, H * 0.03 * Math.sqrt(bs), H * 0.027 * Math.sqrt(bs), slv === 'none' ? SK : TOP);
+    Stick(...El, ...Hd, H * 0.027 * Math.sqrt(bs), H * 0.023 * Math.sqrt(bs), foC); void upC;
+    S(Hd[0] + fd[0] * H * 0.018, Hd[1] + fd[1] * H * 0.018, Hd[2] + fd[2] * H * 0.018, H * 0.023, SK, { sy: 1.3 });
+  });
+  // 목·머리 (고개 회전)
+  C(0, shY - 1, 0, H * 0.026, H * 0.028, H * 0.045, SK, { seg: 12 });
+  const yaw = v('yaw') * PI / 180, cyw = Math.cos(yaw), syw = Math.sin(yaw), HP = (x, z) => [x * cyw + z * syw, -x * syw + z * cyw];
+  const Sh = (x, y, z, r, c, o = {}) => { const [px, pz2] = HP(x, z); S(px, y, pz2, r, c, { ...o, ry: (o.ry || 0) + yaw }); };
+  const Bh = (x, y, z, w2, hh, d2, c, o = {}) => { const [px, pz2] = HP(x, z); B(px, y, pz2, w2, hh, d2, c, { ...o, ry: (o.ry || 0) + yaw }); };
+  const hy = topY - hr * 1.1, face = !!it.face, fsz = Math.max(0.5, Math.min(1.45, it.fsz || 1)), phlF = 1.9 * fsz, tlF = 1.9 * fsz;
+  Sh(0, hy, 0, hr * 0.92, SK, { sy: 1.15, ws: 22, hs: 16 });
+  [-1, 1].forEach(k => Sh(k * hr * 0.9, hy - hr * 0.05, -hr * 0.05, hr * 0.17, SK, { sx: 0.5 }));
+  if (face) Sh(0, hy, 0, hr * 0.92 * 1.015, null, { sy: 1.15, ws: 26, hs: 20, phs: PI / 2 - phlF / 2, phl: phlF, ths: Math.max(0.02, 1.23 - tlF / 2), tl: tlF, tex: 'face' });
+  const hs = it.hs || (sex === 'f' ? 'long' : 'short'), R0 = hr * 0.98 * (it.hv || 1), hcY = hy + hr * 0.12, hcZ = -hr * 0.08;
+  const cap = (tl, o = {}) => Sh(0, hcY, hcZ, R0, HRc, { sy: 1.1, ws: 22, hs: 10, tl, ...o });
+  if (hs !== 'bald') {
+    const cover = hs === 'crew' ? 0.46 : hs === 'curly' ? 0.62 : 0.58;
+    if (face) { cap(PI * cover, { phs: PI / 2 + phlF * 0.45, phl: 2 * PI - phlF * 0.9 }); cap(PI * (hs === 'twoblock' ? 0.17 : 0.12)); }
+    else cap(PI * (hs === 'crew' ? 0.48 : 0.55));
+    if (it.bangs || hs === 'pixie') cap(PI * 0.27, { phs: PI / 2 - 0.85, phl: 1.7, ths: PI * 0.06 });
+    if (hs === 'part') Sh(hr * 0.3, hy + hr * 0.82, hr * 0.05, hr * 0.5, HRc, { sx: 1.3, sy: 0.42 });
+    if (hs === 'twoblock') Sh(0, hy + hr * 0.78, hr * 0.05, hr * 0.85, HRc, { sy: 0.45 });
+    if (hs === 'bob') { [-1, 1].forEach(k => Bh(k * hr * 0.84, hy - hr * 0.85, -hr * 0.3, hr * 0.3, hr * 1.3, hr * 1.0, HRc)); Bh(0, hy - hr * 0.85, -hr * 0.78, hr * 1.9, hr * 1.4, hr * 0.42, HRc); }
+    if (hs === 'long') { Bh(0, shY - H * 0.09, -hr * 0.62, hr * 1.75, hy - shY + H * 0.09, hr * 0.6, HRc); [-1, 1].forEach(k => Bh(k * hr * 0.82, hy - hr * 1.6, -hr * 0.2, hr * 0.28, hr * 1.7, hr * 0.7, HRc)); }
+    if (hs === 'wavy') for (let i = 0; i < 7; i++) [-1, 0, 1].forEach(k => Sh(k * hr * 0.62, hy - i * hr * 0.42, -hr * 0.62 + (k ? hr * 0.28 : 0), hr * 0.36, HRc));
+    if (hs === 'pony') { const [x0, z0] = HP(0, -hr * 1.0), [x1, z1] = HP(0, -hr * 1.3); Stick(x0, hy + hr * 0.2, z0, x1, hy - hr * 2.2, z1, hr * 0.24, hr * 0.12, HRc); Sh(0, hy + hr * 0.25, -hr * 0.97, hr * 0.17, HRc); }
+    if (hs === 'bun') Sh(0, hy + hr * 0.6, -hr * 0.78, hr * 0.45, HRc);
+    if (hs === 'lowbun') Sh(0, hy - hr * 0.3, -hr * 1.02, hr * 0.42, HRc);
+    if (hs === 'curly') for (let i = 0; i < 22; i++) { const th = 0.2 + (i % 4) * 0.33, ph = i * 2.4; const x = Math.sin(th) * Math.cos(ph), z = Math.sin(th) * Math.sin(ph); if (face && z > 0.35 && th > 0.4) continue; Sh(x * R0, hcY + Math.cos(th) * R0 * 1.05, hcZ + z * R0, hr * 0.27, HRc); }
+  }
+  if (it.glasses) { const gz = hr * 0.92 * 0.97, gy = hy + hr * 0.1, gr2 = hr * 0.2, gc = it.glassC || 0x2b2b2d; [-1, 1].forEach(k => { const [px, pz2] = HP(k * hr * 0.33, gz); T(px, gy, pz2, gr2, Math.max(0.15, hr * 0.03), gc, { ts: 20, ry: yaw }); }); Bh(0, gy - hr * 0.02, gz, hr * 0.26, hr * 0.04, hr * 0.04, gc); }
+  if (it.veil) { const [vx, vz] = HP(0, -hr * 1.4); C(vx, sit ? hipY : H * 0.2, vz, hr * 0.6, H * 0.2, hy - (sit ? hipY : H * 0.2), 0xffffff, { op: 0.35, seg: 20 }); }
+  if (it.flower && of !== 'gown' && of !== 'mermaid') S(-sw * 0.5, shY - H * 0.09, zf + 0.6, H * 0.017, 0xffffff, { ws: 10, hs: 8 });
+  if (it.bouquet) {
+    const [h1, h2] = hands, close = Math.hypot(h1[0] - h2[0], h1[1] - h2[1], h1[2] - h2[2]) < H * 0.18;
+    const bp = close ? [(h1[0] + h2[0]) / 2, (h1[1] + h2[1]) / 2 + H * 0.03, (h1[2] + h2[2]) / 2 + H * 0.02] : [0, hipY + H * 0.08, zf + H * 0.05];
+    Stick(bp[0], bp[1] - H * 0.08, bp[2] - H * 0.01, bp[0], bp[1], bp[2], H * 0.008, H * 0.01, 0x6b8f4a);
+    S(bp[0], bp[1] + H * 0.02, bp[2], H * 0.055, 0xfaf7f2, { sy: 0.85, ws: 14, hs: 10 });
+    [[-1, 0], [1, 0.3], [0.2, -1]].forEach(([q, r2]) => S(bp[0] + q * H * 0.03, bp[1] + H * 0.04, bp[2] + r2 * H * 0.02, H * 0.018, 0xf2c6cf, { ws: 8, hs: 6 }));
+  }
 }
 
 function buildPlant(it, w) {

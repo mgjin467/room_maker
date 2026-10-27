@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CAT } from './catalog.js';
-import { buildParts, LEAF, NOPT, DEFA, TYPES, PV, LAMPS, COLSTY, colPat, OUTFITS, HAIRS } from './builders.js';
+import { buildParts, LEAF, NOPT, DEFA, TYPES, PV, LAMPS, COLSTY, colPat, OUTFITS, HAIRS, POSES, SLEEVES, TIES } from './builders.js';
 import { buildOpening, buildLight, WIN_ST, DOOR_ST, LKIND, kelvin, FCOLS, CURT, SWING, TEMPS, disposeTree } from './fixtures.js';
 import { drawPlan, polyArea } from './plan.js';
 import { RECT, orient, edgesOf, arcPts, outline, bbox, inside, segDist, P as EP, SHAPES, shapePreset, isRect } from './geom.js';
@@ -9,7 +9,8 @@ import { MATS, MATN, makeMat, VIEWS, VTIME } from './materials.js';
 import { saveFile, isMobile } from './save.js';
 import { Cloud } from './cloud.js';
 import { initAI } from './aiui.js';
-import { faceTexture } from './faces.js';
+import { faceTexture, sampleSkin } from './faces.js';
+import { initHScroll, reveal } from './hscroll.js';
 
 const $ = id => document.getElementById(id);
 const PI = Math.PI, rd = Math.round, r1 = v => Math.round(v * 10) / 10, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -372,7 +373,7 @@ function mk(it) {
   P.forEach(p => {
     const c = col(it, p.c), mat = MAIN_TOK.has(p.c) ? it.mat : ACC_TOK.has(p.c) ? it.mat2 : '', key = c + '|' + (p.op || 1) + '|' + (p.em ? 1 : 0) + '|' + (mat || '');
     let mt = cm[key];
-    if (p.tex === 'face' && it.face) { mt = cm['face'] || (cm['face'] = new THREE.MeshLambertMaterial({ color: 0xffffff, map: faceTexture(it.face), transparent: true, depthWrite: false })); if (!ms.includes(mt)) ms.push(mt); }
+    if (p.tex === 'face' && it.face) { mt = cm['face'] || (cm['face'] = new THREE.MeshLambertMaterial({ color: 0xffffff, map: faceTexture(it.face, it.fzoom, it.fox, it.foy), transparent: true, depthWrite: false })); if (!ms.includes(mt)) ms.push(mt); }
     if (!mt) {
       mt = mat && !p.em ? makeMat(mat, c) : new THREE.MeshLambertMaterial({ color: c });
       if (mt.map) { mt.map = mt.map.clone(); mt.map.needsUpdate = true; mt.map.repeat.set(rep, rep); }
@@ -731,6 +732,27 @@ function rotSel(deg = 90) {
   if (sel.k === 'item') { const it = sel.o; if (it.lock) return toast('잠긴 가구입니다'); if (it.mt === 'w') return toast('벽 부착 가구는 벽 방향을 따릅니다'); it.rot = norm360((it.rot || 0) + deg); fit(it, false); upd(); }
   else if (sel.k === 'light' && !lightIsWall(sel.o)) { if (lockGuard(sel)) return; sel.o.rot = norm360((sel.o.rot || 0) + deg); placeLight(sel.o); upd(); }
 }
+// 화면 표시는 '시계방향 각도'(위에서 볼 때). 내부 rot 는 반시계(+) 기준.
+const cwOf = o => norm360(-(o.rot || 0));
+const rotCW = d => rotSel(-d);
+function rotTo(cw) {
+  if (!sel) return; const o = sel.o;
+  if (sel.k === 'item') { if (o.lock) return toast('잠긴 가구입니다'); if (o.mt === 'w') return; o.rot = norm360(-cw); fit(o, false); upd(); }
+  else if (sel.k === 'light' && !lightIsWall(o)) { if (lockGuard(sel)) return; o.rot = norm360(-cw); placeLight(o); upd(); }
+}
+let ROT_DIR = LS.get('r3d_rotdir', 'cw'), ROT_STEP = LS.get('r3d_rotstep', 30);
+// 회전 컨트롤: 빠른 버튼 + 원하는 각도 직접 입력(시계/반시계)
+function rotWidget(o, compact) {
+  const q = (d, t, c) => BTN(t, () => rotCW(d), c || 'c', (d > 0 ? '시계방향 ' : '반시계방향 ') + Math.abs(d) + '°');
+  const inp = h('input', { type: 'number', min: 0, max: 360, step: 1, inputmode: 'decimal', value: ROT_STEP, class: 'rotin', 'aria-label': '회전 각도' });
+  const dir = h('select', { class: 'rotdir', 'aria-label': '회전 방향' }, h('option', { value: 'cw' }, '⟳ 시계방향'), h('option', { value: 'ccw' }, '⟲ 반시계방향')); dir.value = ROT_DIR;
+  const go = () => { const v = parseFloat(inp.value); if (!isFinite(v) || v === 0) return toast('각도를 입력하세요'); ROT_STEP = v; ROT_DIR = dir.value; LS.set('r3d_rotstep', v); LS.set('r3d_rotdir', ROT_DIR); rotCW(ROT_DIR === 'cw' ? v : -v); };
+  inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+  const cur = h('span', { class: 'rotcur' }); const sync = () => { cur.textContent = '현재 ' + r1(cwOf(o)) + '°'; }; sync(); BIND.push([cur, sync]);
+  return h('div', { class: 'rotw' + (compact ? ' cmp' : '') },
+    h('div', { class: 'rotq' + (compact ? ' c3' : '') }, compact ? null : q(-15, '⟲ 15°'), q(-45, '⟲ 45°'), q(-90, '⟲ 90°'), q(-180, '⟲ 180°'), compact ? null : q(15, '⟳ 15°'), q(45, '⟳ 45°'), q(90, '⟳ 90°', 'b'), q(180, '⟳ 180°')),
+    h('div', { class: 'rotc' }, inp, h('span', { class: 'u' }, '°'), dir, BTN('적용', go, 'b'), BTN('0°', () => rotTo(0), 'o', '정면(0°)으로'), cur));
+}
 function setSize(it, k, v) {
   v = Math.max(1, v);
   if (PREF.lock) { const f = v / it[k]; if (!isFinite(f) || f <= 0) return; ['w', 'd', 'h'].forEach(q => { it[q] = r1(Math.max(1, it[q] * f)); }); }
@@ -931,7 +953,9 @@ addEventListener('keydown', e => {
   if (k === 'Escape') { if (mode) setMode(null); else setSel(null); closeMenus(); document.activeElement.blur && document.activeElement.blur(); return; }
   if (!sel) return;
   if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); return delSel(); }
-  if (k === 'r' || k === 'R') return rotSel(e.shiftKey ? 15 : 90);
+  if (k === 'r' || k === 'R') return rotCW(e.shiftKey ? -90 : 90);
+  if (k === 'q' || k === 'Q') return rotCW(e.shiftKey ? -15 : -45);
+  if (k === 'e' || k === 'E') return rotCW(e.shiftKey ? 15 : 45);
   if (k === 'f' || k === 'F') return focusSel();
   const st = e.altKey ? 1 : e.shiftKey ? 20 : 5;
   let dx = 0, dz = 0;
@@ -1000,6 +1024,7 @@ window.addEventListener('resize', () => { if (mq.matches) setSheet(sheetState); 
 function showTab(t) {
   PREF.tab = t; LS.set(K_PREF, PREF);
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  reveal(document.querySelector(`#tabs button[data-t="${t}"]`));
   document.querySelectorAll('#p > section').forEach(s => { s.hidden = s.id !== 't-' + t; });
   if (t === 'list') renderList(); if (t === 'file') renderFile(); if (t === 'room') renderRoom(); if (t === 'light') renderLights(); if (t === 'ai') AI.render();
 }
@@ -1088,8 +1113,8 @@ function itemPanel(b, it) {
     h('h4', {}, '위치·회전'),
     it.mt === 'w' ? G(3, F('설치 벽', bsel(E.filter(straight).map(e => [e.i, '벽' + (e.i + 1)]), () => it.wall, v => { it.wall = +v; fit(it, false); upd(); })), F('벽 왼쪽 끝에서', bnum(() => (it.ws || 0) - fpw(it) / 2, v => { it.ws = v + fpw(it) / 2; fit(it, false); upd(); })), F('바닥에서 높이', bnum(() => it.y || 0, v => { it.y = v; fit(it, false); upd(); }, { min: 0 })))
       : G(4, F('왼쪽에서', bnum(() => it.x - fp(it)[0] / 2 - BB.x0, v => { it.x = BB.x0 + v + fp(it)[0] / 2; fit(it, false); upd(); })), F('뒤에서', bnum(() => it.z - fp(it)[1] / 2 - BB.z0, v => { it.z = BB.z0 + v + fp(it)[1] / 2; fit(it, false); upd(); })),
-        F('바닥에서 높이', bnum(() => it.y || 0, v => { it.y = v; fit(it, false); upd(); }, { min: 0 })), F('회전 (°)', bnum(() => it.rot || 0, v => { it.rot = norm360(v); fit(it, false); upd(); }, { step: 15 }))),
-    it.mt !== 'w' ? h('div', { class: 'r' }, BTN('⟲ 15°', () => rotSel(-15), 'c'), BTN('⟳ 15°', () => rotSel(15), 'c'), BTN('⟳ 90°', () => rotSel(90), 'b'), BTN('가로 중앙', () => { it.x = center()[0]; fit(it, false); upd(); }, 'c'), BTN('세로 중앙', () => { it.z = center()[1]; fit(it, false); upd(); }, 'c')) : null,
+        F('바닥에서 높이', bnum(() => it.y || 0, v => { it.y = v; fit(it, false); upd(); }, { min: 0 })), F('각도 (시계°)', bnum(() => cwOf(it), v => { it.rot = norm360(-v); fit(it, false); upd(); }, { step: 15 }))),
+    it.mt !== 'w' ? [rotWidget(it), h('div', { class: 'r' }, BTN('가로 중앙', () => { it.x = center()[0]; fit(it, false); upd(); }, 'c'), BTN('세로 중앙', () => { it.z = center()[1]; fit(it, false); upd(); }, 'c'))] : null,
     h('h4', {}, '옵션'),
     h('div', { class: 'cg' },
       LEAF[it.type] ? bchk('날개 접기', () => it.fold, v => { it.fold = v; RF(); commitSoon(); }) : null,
@@ -1104,18 +1129,44 @@ function itemPanel(b, it) {
   );
 }
 function personEditor(it, C2) {
-  return h('div', {},
-    G(3, F('성별', bsel([['m', '남성'], ['f', '여성'], ['c', '어린이']], () => it.sex || 'm', v => { it.sex = v; C2(); })), F('옷차림', bsel(OUTFITS, () => it.outfit || 'suit', v => { it.outfit = v; C2(); })), F('자세', bsel([['stand', '서 있음'], ['sit', '앉음']], () => it.pose || 'stand', v => { it.pose = v; C2(); }))),
-    G(4, F('피부', bcol(() => it.skin || '#e8c4a2', v => { it.skin = v; C2(); })), F('머리색', bcol(() => it.hair || '#2a2220', v => { it.hair = v; C2(); })), F('신발', bcol(() => it.shoe || '#1d1d1f', v => { it.shoe = v; C2(); })), F('머리 모양', bsel(HAIRS, () => it.hs || 'short', v => { it.hs = v; C2(); }))),
-    h('div', { class: 'cg' }, bchk('면사포', () => it.veil, v => { it.veil = v ? 1 : 0; C2(); }), bchk('안경', () => it.glasses, v => { it.glasses = v ? 1 : 0; C2(); }), bchk('부토니에 (가슴 꽃)', () => it.flower, v => { it.flower = v ? 1 : 0; C2(); }), bchk('부케', () => it.bouquet, v => { it.bouquet = v ? 1 : 0; C2(); })),
-    F('넥타이 색', bcol(() => it.tie || '#1d1d1f', v => { it.tie = v; C2(); })),
+  const chip = (list, key, def, after) => h('div', { class: 'ch' }, list.map(([v, t]) => BTN(t, () => { it[key] = v; if (after) after(v); C2(); renderSel(); }, 'c' + ((it[key] || def) === v ? ' on' : ''))));
+  const sl = (lbl, k, min, max, step, fmt, def = 0) => F(lbl, brange(() => it[k] ?? (POSES[it.pose] || POSES.stand)[1][k] ?? def, v => { it[k] = v; C2(); }, min, max, step, fmt));
+  const psl = (lbl, k, min, max, step, fmt) => F(lbl, brange(() => it[k] ?? (POSES[it.pose] || POSES.stand)[1][k] ?? 0, v => { it[k] = v; if (it.pose && !String(it.pose).startsWith('custom')) it.pose = 'custom_' + it.pose; C2(); }, min, max, step, fmt));
+  const deg = v => Math.round(v) + '°', pct = v => Math.round(v * 100) + '%';
+  const HAIRC = [['#1a1716', '검정'], ['#2a2220', '흑갈색'], ['#4a3426', '갈색'], ['#7a5634', '밝은 갈색'], ['#c9a46a', '금발'], ['#8d8d8d', '회색'], ['#e8e6e1', '흰색']];
+  const SKINC = [['#f3d5bf', '밝은 피부'], ['#e8c4a2', '보통'], ['#d9a98a', '살짝 어두운'], ['#b9825f', '갈색'], ['#7d5038', '어두운']];
+  const skirt = ['blouse', 'dress', 'longdress', 'gown', 'mermaid', 'hanbok'].includes(it.outfit);
+  return h('div', { class: 'pe' },
+    h('h4', {}, '기본'),
+    G(3, F('성별', bsel([['m', '남성'], ['f', '여성'], ['c', '어린이']], () => it.sex || 'm', v => { it.sex = v; C2(); })), F('키 (cm)', bnum(() => it.h, v => { setSize(it, 'h', v); sizeChanged(it); }, { min: 50, max: 230 })), F('빠른 키', h('div', { class: 'r' }, BTN('180', () => { setSize(it, 'h', 180); sizeChanged(it); syncSel(); }, 'c'), BTN('165', () => { setSize(it, 'h', 165); sizeChanged(it); syncSel(); }, 'c'), BTN('120', () => { setSize(it, 'h', 120); sizeChanged(it); syncSel(); }, 'c')))),
+    G(3, sl('어깨 너비', 'shw', 0.8, 1.25, 0.01, pct, 1), sl('체형 (마름↔통통)', 'build', 0.75, 1.45, 0.01, pct, 1), sl('머리 크기', 'headS', 0.8, 1.3, 0.01, pct, 1)),
+    h('h4', {}, '얼굴'),
     h('div', { class: 'facebox' }, it.face ? h('img', { src: it.face, class: 'facethumb' }) : h('span', { class: 'mu sm' }, '얼굴 사진 없음'),
-      h('div', { class: 'r' }, BTN(it.face ? '얼굴 사진 바꾸기' : '📷 얼굴 사진 넣기', () => AI.openFace(it, () => { mk(it); renderSel(); commitSoon(0); }), 'b'), it.face ? BTN('얼굴 사진 빼기', () => { delete it.face; mk(it); renderSel(); commitSoon(0); }, 'c') : null)),
-    h('div', { class: 'r' }, BTN('남성 180cm', () => { setSize(it, 'h', 180); sizeChanged(it); }, 'c'), BTN('여성 165cm', () => { setSize(it, 'h', 165); sizeChanged(it); }, 'c'), BTN('어린이 120cm', () => { setSize(it, 'h', 120); sizeChanged(it); }, 'c')));
+      h('div', {}, h('div', { class: 'r' }, BTN(it.face ? '얼굴 사진 바꾸기' : '📷 얼굴 사진 넣기', () => AI.openFace(it, () => { mk(it); renderSel(); commitSoon(0); }), 'b'), it.face ? BTN('빼기', () => { delete it.face; mk(it); renderSel(); commitSoon(0); }, 'c') : null),
+        it.face ? h('div', { class: 'r' }, BTN('사진에서 피부색 맞추기', async () => { it.skin = await sampleSkin(it.face); C2(); syncSel(); }, 'c'), BTN('얼굴 설정 초기화', () => { ['fsz', 'fzoom', 'fox', 'foy'].forEach(k => delete it[k]); C2(); renderSel(); }, 'c')) : null)),
+    it.face ? G(2, sl('얼굴 영역 크기 (머리에서)', 'fsz', 0.5, 1.45, 0.01, pct, 1), sl('사진 확대·축소', 'fzoom', 0.5, 2.5, 0.01, pct, 1), sl('사진 좌우 이동', 'fox', -0.4, 0.4, 0.01, v => (v > 0 ? '→' : v < 0 ? '←' : '') + Math.round(Math.abs(v) * 100)), sl('사진 상하 이동', 'foy', -0.4, 0.4, 0.01, v => (v > 0 ? '↓' : v < 0 ? '↑' : '') + Math.round(Math.abs(v) * 100))) : null,
+    F('피부색', swatches(SKINC, () => it.skin || '#e8c4a2', v => { it.skin = v; C2(); })),
+    h('div', { class: 'cg' }, bchk('안경', () => it.glasses, v => { it.glasses = v ? 1 : 0; C2(); renderSel(); })), it.glasses ? F('안경테 색', swatches([['#2b2b2d', '검정'], ['#8a6a50', '갈색'], ['#c9a24a', '골드'], ['#b8bcc2', '실버']], () => it.glassC || '#2b2b2d', v => { it.glassC = v; C2(); })) : null,
+    h('h4', {}, '헤어'),
+    chip(HAIRS, 'hs', it.sex === 'f' ? 'long' : 'short'),
+    G(2, sl('머리 볼륨', 'hv', 0.85, 1.3, 0.01, pct, 1), h('div', { class: 'cg' }, bchk('앞머리 (뱅)', () => it.bangs, v => { it.bangs = v ? 1 : 0; C2(); }))),
+    F('머리색', swatches(HAIRC, () => it.hair || '#2a2220', v => { it.hair = v; C2(); })),
+    h('h4', {}, '옷'),
+    chip(OUTFITS, 'outfit', it.sex === 'f' ? 'dress' : 'suit', () => { delete it.skirtL; }),
+    G(2, F('소매', bsel(SLEEVES, () => it.sleeve || '', v => { it.sleeve = v || undefined; C2(); })), F('넥타이', bsel(TIES, () => it.tieT || '', v => { it.tieT = v || undefined; C2(); }))),
+    skirt ? sl('치마·드레스 길이', 'skirtL', 0.3, 1, 0.01, v => v >= 0.93 ? '바닥까지' : v > 0.7 ? '롱' : v > 0.5 ? '무릎 아래' : '무릎 위', { blouse: 0.5, dress: 0.55, longdress: 0.97, gown: 1, mermaid: 1, hanbok: 1 }[it.outfit]) : null,
+    G(5, F('상의', bcol(() => it.color, v => { it.color = v; C2(); })), F('하의·치마', bcol(() => it.c2 || it.color, v => { it.c2 = v; C2(); })), F('포인트', bcol(() => it.c3 || '#f7f7f5', v => { it.c3 = v; C2(); })), F('넥타이', bcol(() => it.tie || '#1d1d1f', v => { it.tie = v; C2(); })), F('신발', bcol(() => it.shoe || '#1d1d1f', v => { it.shoe = v; C2(); }))),
+    h('div', { class: 'cg' }, bchk('가슴꽃', () => it.flower, v => { it.flower = v ? 1 : 0; C2(); }), bchk('부케', () => it.bouquet, v => { it.bouquet = v ? 1 : 0; C2(); }), bchk('면사포', () => it.veil, v => { it.veil = v ? 1 : 0; C2(); })),
+    h('h4', {}, '자세'),
+    h('div', { class: 'ch' }, Object.entries(POSES).map(([k, [n, vals]]) => BTN(n, () => { Object.assign(it, vals); it.pose = k; C2(); renderSel(); }, 'c' + (it.pose === k ? ' on' : '')))),
+    G(3, psl('왼팔 들기', 'aL', -60, 180, 1, deg), psl('왼팔 방향 (앞↔옆)', 'zL', 0, 100, 1, deg), psl('왼팔꿈치', 'eL', 0, 150, 1, deg)),
+    G(3, psl('오른팔 들기', 'aR', -60, 180, 1, deg), psl('오른팔 방향 (앞↔옆)', 'zR', 0, 100, 1, deg), psl('오른팔꿈치', 'eR', 0, 150, 1, deg)),
+    G(3, psl('걷기 보폭', 'leg', -1, 1, 0.05, v => Math.round(v * 100) + ''), psl('고개 좌우', 'yaw', -70, 70, 1, deg), F('앉기', h('div', { class: 'cg' }, bchk('앉은 자세', () => it.sit ?? (POSES[it.pose] || POSES.stand)[1].sit, v => { it.sit = v ? 1 : 0; C2(); })))),
+    h('p', { class: 'mu sm' }, '왼쪽·오른쪽은 사람 본인 기준입니다. 슬라이더를 끌면 3D에서 바로 바뀝니다.'));
 }
 function saveCustom(it, name) {
   const n = name || prompt('카탈로그 \'내 가구\'에 등록할 이름', it.name); if (!n) return;
-  const ex = {}; ['c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie'].forEach(k => { if (it[k] != null) ex[k] = it[k]; });
+  const ex = {}; ['c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit'].forEach(k => { if (it[k] != null) ex[k] = it[k]; });
   CUSTOM = CUSTOM.filter(p => p[0] !== n); CUSTOM.push([n, it.w, it.d, it.h, it.color, it.type, ex]); LS.set(K_CUS, CUSTOM); renderCatalog(); cloudSettingsSoon(); toast(`'${n}'을(를) 내 가구에 등록했습니다`);
 }
 function opPanel(b, o) {
@@ -1158,7 +1209,8 @@ function lightPanel(b, l) {
     h('div', { class: 'keep' }, G(2, F('색온도', bsel(TEMPS, () => l.temp || 3000, v => { l.temp = +v; RB(); })), F('밝기 (0 = 완전 어둡게)', brange(() => l.lum ?? 1, v => { l.lum = v; RB(); }, 0, 2.5, 0.1)))),
     F('기구 색', swatches([['#f2f2f0', '화이트'], ['#2b2b2d', '블랙'], ['#b59a5b', '골드'], ['#b8bcc2', '실버'], ['#a0714f', '우드']], () => l.color || '#f2f2f0', v => { l.color = v; RB(); })),
     isW ? G(3, F('설치 벽', bsel(E.filter(straight).map(e => [e.i, '벽' + (e.i + 1)]), () => l.wall, v => { l.wall = +v; RB(); })), F('벽 왼쪽 끝에서', bnum(() => l.s, v => { l.s = v; placeLight(l); updSelBox(); commitSoon(); })), F('바닥에서 높이', bnum(() => l.y, v => { l.y = v; placeLight(l); updSelBox(); commitSoon(); })))
-      : G(3, F('왼쪽에서', bnum(() => l.x - BB.x0, v => { l.x = BB.x0 + v; placeLight(l); updSelBox(); commitSoon(); })), F('뒤에서', bnum(() => l.z - BB.z0, v => { l.z = BB.z0 + v; placeLight(l); updSelBox(); commitSoon(); })), k.rot ? F('회전 (°)', bnum(() => l.rot || 0, v => { l.rot = v; placeLight(l); updSelBox(); commitSoon(); }, { step: 15 })) : F('', h('span'))),
+      : G(3, F('왼쪽에서', bnum(() => l.x - BB.x0, v => { l.x = BB.x0 + v; placeLight(l); updSelBox(); commitSoon(); })), F('뒤에서', bnum(() => l.z - BB.z0, v => { l.z = BB.z0 + v; placeLight(l); updSelBox(); commitSoon(); })), k.rot ? F('각도 (시계°)', bnum(() => cwOf(l), v => { l.rot = norm360(-v); placeLight(l); updSelBox(); commitSoon(); }, { step: 15 })) : F('', h('span'))),
+    !isW && k.rot ? rotWidget(l) : null,
     G(3, F(l.kind === 'panel' ? '가로' : '크기·길이', bnum(() => l.w || k.w, v => { l.w = v; RB(); }, { min: 4 })), l.kind === 'panel' ? F('세로', bnum(() => l.d || k.d, v => { l.d = v; RB(); }, { min: 4 })) : null, k.drop != null ? F('천장에서 내림', bnum(() => l.drop ?? k.drop, v => { l.drop = v; RB(); }, { min: 5 })) : null),
     h('div', { class: 'r keep' }, BTN('복제', dupSel), BTN('카메라 맞춤', focusSel)), h('div', { class: 'r' }, BTN('삭제', delSel)),
   );
@@ -1188,7 +1240,9 @@ function quick() {
   const o = sel.o, it = sel.k === 'item';
   $('qbn').textContent = it ? `${itemLabel(o)} ${o.name} · ${r1(fpw(o))}×${r1(o.d)}×${r1(o.h)}` : sel.k === 'op' ? `${opLabel(o)} · ${(o.kind === 'win' ? WIN_ST : DOOR_ST).find(s => s[0] === o.st)?.[1] || ''} ${rd(o.w)}×${rd(o.h)}` : sel.k === 'light' ? `${lightLabel(o)} · ${(LKIND[o.kind] || {}).n}` : labelOf(sel);
   q.querySelectorAll('.qi').forEach(e => e.hidden = !it);
-  q.querySelector('[data-q=rot]').hidden = !(it && o.mt !== 'w') && !(sel.k === 'light' && !lightIsWall(o));
+  const canRot = (it && o.mt !== 'w') || (sel.k === 'light' && !lightIsWall(o) && (LKIND[o.kind] || {}).rot);
+  q.querySelector('[data-q=rot]').hidden = !canRot;
+  if (!canRot || q._last !== o) $('qbrot').hidden = true; q._last = o;
   q.querySelector('[data-q=dup]').hidden = !o;
   if (it && document.activeElement !== $('qbp')) $('qbp').value = rd(pctAll(o));
   const lb = q.querySelector('[data-q=lock]'); lb.hidden = false; lb.textContent = isLocked(sel) ? '🔒' : '🔓'; lb.title = isLocked(sel) ? '잠금 해제' : '잠금 (고정)';
@@ -1196,7 +1250,9 @@ function quick() {
 $('qb').addEventListener('click', e => {
   const b = e.target.closest('[data-q]'); if (!b || !sel) return; const a = b.dataset.q, o = sel.o;
   if (a === 'lock') return setLock(sel, isLocked(sel) ? 0 : 1);
-  if (a === 'rot') rotSel(90); else if (a === 'dup') dupSel(); else if (a === 'del') delSel(); else if (a === 'edit') { showTab('sel'); if (mq.matches) setSheet('half'); } else if (a === 'focus') focusSel();
+  if (a === 'rot') { const p = $('qbrot'); p.hidden = !p.hidden; if (!p.hidden) { p.replaceChildren(rotWidget(o, true)); } return; }
+  if (a === 'dup' || a === 'del' || a === 'edit') $('qbrot').hidden = true;
+  if (false) ; else if (a === 'dup') dupSel(); else if (a === 'del') delSel(); else if (a === 'edit') { showTab('sel'); if (mq.matches) setSheet('half'); } else if (a === 'focus') focusSel();
   else if (sel.k === 'item') {
     if (o.lock) return toast('잠긴 가구입니다');
     if (a === 'm') { scaleIt(o, 1 / 1.05); sizeChanged(o); } if (a === 'p') { scaleIt(o, 1.05); sizeChanged(o); }
@@ -1394,7 +1450,7 @@ $('undo').onclick = undo; $('redo').onclick = redo;
 $('fabAdd').onclick = () => { showTab('add'); setSheet('half'); setTimeout(() => $('q').focus({ preventScroll: true }), 300); };
 $('fabAI').onclick = () => { showTab('ai'); setSheet('half'); };
 $('fabCam').onclick = () => AI.openPhoto('furniture');
-const HINT = '드래그: 이동 · 빈 곳 드래그: 회전 · 우클릭 드래그: 이동 · 휠: 확대 · 파란 점/주황 화살표: 크기 · R 회전 · Del 삭제 · Ctrl+Z 되돌리기 · 더블클릭: 확대';
+const HINT = '드래그: 이동 · 빈 곳 드래그: 회전 · 우클릭 드래그: 이동 · 휠: 확대 · 파란 점/주황 화살표: 크기 · R/Shift+R 시계·반시계 90° · Q/E 45° · Del 삭제 · Ctrl+Z 되돌리기 · 더블클릭: 확대';
 $('hint').textContent = HINT;
 document.addEventListener('click', e => { document.querySelectorAll('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
 
@@ -1422,7 +1478,7 @@ function resolveLights(t) {
 }
 function resolveOps(t) { if (Array.isArray(t)) return t.flatMap(resolveOps); const s = String(t || '').replace(/\s/g, ''); return OPS.filter(o => opLabel(o) === s || String(o.id) === s.replace('#', '')); }
 function wallIdx(w) { if (w == null) return undefined; if (typeof w === 'number') return clamp(Math.round(w), 0, E.length - 1); const m = /(\d+)/.exec(String(w)); if (m) return clamp(+m[1] - 1, 0, E.length - 1); const map = { N: 0, E: 1, S: 2, W: 3, 뒷벽: 0, 오른쪽: 1, 앞벽: 2, 왼쪽: 3 }; for (const k in map) if (String(w).includes(k)) return Math.min(map[k], E.length - 1); return undefined; }
-const ITEM_KEYS = ['name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'face'];
+const ITEM_KEYS = ['name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
 function applySet(it, set) {
   ITEM_KEYS.forEach(k => { if (set[k] !== undefined && set[k] !== null) it[k] = set[k]; });
   if (set.type && !TYPES[set.type]) it.type = 'box';
@@ -1489,7 +1545,7 @@ function runActions(actions = []) {
 function describe() {
   const P1 = v => rd(v);
   return {
-    unit: 'cm', coord: 'x=왼쪽 외곽에서 가구 중심까지, z=뒤쪽 외곽에서 가구 중심까지, rot=시계 반대 회전(도). 벽 번호는 1부터.',
+    unit: 'cm', coord: 'x=왼쪽 외곽에서 가구 중심까지, z=뒤쪽 외곽에서 가구 중심까지, rot=반시계 회전(도, 위에서 볼 때). 시계방향 N° 회전은 drot:-N, 반시계 N°는 drot:N. 벽 번호는 1부터.',
     room: { W: R.W, D: R.D, H: R.H, locked: !!R.lock, shape: isRect(R.pts, R.bul) ? 'rect' : 'custom', area_m2: +(roomArea() / 10000).toFixed(2), floor: { type: R.fl, color: R.flc, dir: R.fld || 0 }, wallColor: R.wc, outsideView: R.view, viewTime: R.vtime, night: !!PREF.night, walls: E.map(e => ({ label: '벽' + (e.i + 1), from: e.a.map(P1), to: e.b.map(P1), len: P1(e.len), curved: !straight(e), color: R.wcs[e.i] || R.wc })) },
     items: items.map(i => ({ label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
     lights: LIGHTS.map(l => ({ label: lightLabel(l), kind: l.kind, kindName: (LKIND[l.kind] || {}).n, x: l.x != null && !lightIsWall(l) ? P1(l.x - BB.x0) : undefined, z: l.z != null && !lightIsWall(l) ? P1(l.z - BB.z0) : undefined, wall: lightIsWall(l) ? '벽' + (l.wall + 1) : undefined, on: l.on !== false, lum: l.lum ?? 1, temp: l.temp, lock: l.lock ? true : undefined })),
@@ -1498,7 +1554,7 @@ function describe() {
 }
 const API = {
   get items() { return items; }, get lights() { return LIGHTS; }, get ops() { return OPS; }, get R() { return R; }, get E() { return E; }, get sel() { return sel; }, get projName() { return projName; }, get night() { return !!PREF.night; },
-  CAT, TYPES, MATS, LKIND, WIN_ST, DOOR_ST, SHAPES, COLSTY, OUTFITS, VIEWS, FLOORS,
+  CAT, TYPES, MATS, LKIND, WIN_ST, DOOR_ST, SHAPES, COLSTY, OUTFITS, HAIRS, POSES, VIEWS, FLOORS,
   describe, runActions, captureView, planCanvas, shot3D, toast, saveFile, fname, showTab, setSheet, h, BTN, F, G, app, isMobile,
   itemLabel, lightLabel, opLabel, grp, addPreset, placeNew, newItem, specToItem, saveCustom, renderCatalog, commit: () => commitSoon(0),
   applyRoomSpec(spec) {
@@ -1519,7 +1575,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 (function init() {
   if (!Object.keys(PROJ).length) { const v1 = LS.get('roomLayoutV1', null); PROJ['내 방'] = { t: Date.now(), s: v1 && v1.R ? migrateV1(v1) : exampleState() }; }
   let cur = LS.get(K_CUR, null); if (!cur || !PROJ[cur]) cur = Object.keys(PROJ)[0];
-  syncTb(); renderCatalog(); layout(); rsz();
+  syncTb(); renderCatalog(); layout(); rsz(); initHScroll();
   showTab(PREF.tab === 'sel' ? 'add' : PREF.tab || 'add');
   openProject(cur); view('door');
   if (mq.matches) setSheet('peek');

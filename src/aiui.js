@@ -1,7 +1,7 @@
 // AI 기능 UI: 대화 명령 · 사진 인식(가구/사람/방) · 실사 렌더 · 설정(키·모델) · 갤러리
 import { PROVIDERS, TASKS, DEFAULT_MODELS, parseKeys, aiText, aiImage, parseJSON, listModels, fileToDataURL, coverResize } from './ai.js';
 import { Cloud, parseCfg, saveCfg, loadCfg, RULES } from './cloud.js';
-import { cropFace, centerBox } from './faces.js';
+import { cropFace, centerBox, sampleSkin } from './faces.js';
 
 const K_KEYS = 'room3d.v2.aikeys', K_MODELS = 'room3d.v2.aimodels', K_EXTRA = 'room3d.v2.aiextra', K_CHAT = 'room3d.v2.chat';
 const ASPECTS = [['1:1', 1], ['2:3', 2 / 3], ['3:2', 1.5], ['3:4', 0.75], ['4:3', 4 / 3], ['4:5', 0.8], ['5:4', 1.25], ['9:16', 9 / 16], ['16:9', 16 / 9], ['21:9', 21 / 9]];
@@ -92,7 +92,7 @@ actions 종류:
 모델키(type): ${typeList()}
 재질키(mat): ${A.MATS.map(m => m[0] || '""').join(', ')}
 열 패턴(cpat, 열마다 한 글자): \n${colList()}
-사람(person): sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, 기본 키 남180 여165 어린이120.
+사람(person): sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, hs(머리) ${A.HAIRS.map(o => o[0]).join('|')}, bangs 앞머리 1/0, hair/skin/shoe/tie/c3 #hex, color=상의 c2=하의, sleeve long|short|none, tieT none|tie|bow, skirtL 0.3~1, pose ${Object.keys(A.POSES).join('|')} 또는 각도 aL/aR(팔 들기 -60~180) zL/zR(0앞~90옆) eL/eR(팔꿈치 0~150) leg(보폭 -1~1) yaw(고개 -70~70) sit 1/0, 체형 shw/build/headS(0.8~1.4), 얼굴사진 크기 fsz(0.5~1.45) fzoom(0.5~2.5) fox/foy(-0.4~0.4), glasses/flower/bouquet/veil 1/0. 기본 키 남180 여165 어린이120. 왼쪽/오른쪽 팔은 사람 본인 기준(L=본인 왼쪽).
 카탈로그(preset 이름으로 쓰면 크기·모양이 자동 적용):\n${catalogNames()}
 잠금: 상태에서 lock:true 인 가구·창호·조명과 room.locked 인 방은 위치·크기·모양을 바꾸거나 삭제하지 마세요(조명 켜기·밝기·색온도, 문·창 열고 닫기, 커튼은 가능). 사용자가 잠금/고정을 요청하면 set에 "lock":1, 해제는 "lock":0 (방은 room set의 "lock").
 질문·분석(동선, 견적, 스타일 조언)만 요청하면 actions는 빈 배열. 모호하면 합리적으로 가정하고 reply에 밝히세요. 색은 반드시 #hex.`;
@@ -203,7 +203,7 @@ actions 종류:
         const out = await aiText({ ...m, system: sys, prompt: mode === 'furniture' ? '사진 속 가구/소품을 모두 추출하세요. 치수표를 꼼꼼히 읽으세요.' : mode === 'people' ? '사진 속 모든 사람을 왼쪽부터 추출하세요.' : '방/도면을 분석하세요.', images: imgs, json: true });
         result = parseJSON(out);
         if (mode === 'furniture') (result.items || []).forEach(it => { it._on = true; it._v = -1; });
-        if (mode === 'people') { for (const p of (result.people || [])) { p._on = true; p._faceOn = true; p._adj = { dx: 0, dy: 0, s: 1 }; p.height = p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180; const src = imgs[Math.min(imgs.length - 1, Math.max(0, p.img | 0))]; p._src = src; if (Array.isArray(p.face_box) && p.face_box.length === 4) { try { p.face = await cropFace(src, p.face_box, p._adj); } catch (e) { } } } }
+        if (mode === 'people') { for (const p of (result.people || [])) { p._on = true; p._faceOn = true; p._adj = { dx: 0, dy: 0, s: 1 }; p.height = p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180; const src = imgs[Math.min(imgs.length - 1, Math.max(0, p.img | 0))]; p._src = src; if (Array.isArray(p.face_box) && p.face_box.length === 4) { try { p.face = await cropFace(src, p.face_box, p._adj); p.skin = await sampleSkin(p.face); } catch (e) { } } } }
       } catch (err) { toast('⚠ ' + err.message, 7000); }
       draw();
     };
@@ -271,7 +271,7 @@ actions 종류:
         h('div', { class: 'r' }, BTN('🖼 사진 선택', () => fi.click(), 'b'), A.isMobile() ? BTN('🤳 셀카 촬영', () => cam.click()) : null, fi, cam),
         faces.length > 1 ? h('div', { class: 'ch' }, faces.map((f, i) => h('button', { class: 'c' + (cur === f ? ' on' : ''), onclick: async () => { cur = f; if (!cur.face) cur.face = await cropFace(src, cur.face_box, cur._adj); draw(); } }, f.label || `${i + 1}번`))) : null,
         cur && cur.face ? faceAdjuster(cur) : null,
-        cur && cur.face ? h('div', { class: 'r' }, BTN('이 얼굴 적용', () => { it.face = cur.face; done && done(); m.close(); toast('얼굴을 적용했습니다'); }, 'b')) : null);
+        cur && cur.face ? h('div', { class: 'r' }, BTN('이 얼굴 적용', async () => { it.face = cur.face; try { it.skin = await sampleSkin(cur.face); } catch (e) { } done && done(); m.close(); toast('얼굴을 적용했습니다 — 선택 탭에서 크기·위치를 조절할 수 있습니다'); }, 'b')) : null);
     };
     const pick = async files => {
       if (!files[0]) return; src = await fileToDataURL(files[0], 1600); faces = []; cur = null;

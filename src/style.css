@@ -31,8 +31,7 @@ canvas{width:100%;height:100%;display:block;touch-action:none;-webkit-user-selec
 #toast{position:absolute;top:60px;left:50%;transform:translateX(-50%);background:rgba(30,30,32,.92);color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;pointer-events:none;max-width:90%;text-align:center;z-index:30}
 #p{width:380px;flex:none;display:flex;flex-direction:column;background:var(--pn);border-left:1px solid var(--bd);min-height:0}
 #grab{display:none}
-#tabs{display:flex;border-bottom:1px solid var(--bd);overflow-x:auto;flex:none;scrollbar-width:none}
-#tabs::-webkit-scrollbar{display:none}
+#tabs{display:flex;border-bottom:1px solid var(--bd);overflow-x:auto;flex:none}
 #tabs button{flex:1 0 auto;background:none;border:0;border-bottom:2px solid transparent;color:var(--mu);padding:10px 7px;font-size:13px;cursor:pointer;white-space:nowrap}
 #tabs button i{font-style:normal;margin-right:3px}
 #tabs button.on{color:var(--tx);border-bottom-color:var(--ac);font-weight:600}
@@ -104,10 +103,10 @@ p{margin:8px 0}
 .msg .log{font-size:12px;color:var(--mu);margin:3px 4px}
 .thumb{display:block;max-width:120px;border-radius:8px;margin-bottom:4px}
 .hello{padding:6px}
-.chips{display:flex;gap:5px;overflow-x:auto;padding:2px 0 6px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}.chips .c{white-space:nowrap}
+.chips{display:flex;gap:5px;overflow-x:auto;padding:2px 0 6px}.chips .c{white-space:nowrap;flex:none}
 .chatin{display:flex;gap:5px;align-items:flex-end}.chatin textarea{flex:1;min-height:40px}.chatin .ic{border-radius:9px;padding:8px 9px;font-size:15px}.chatin .ic.on{background:var(--rd);color:#fff}
 .attrow{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}.att{position:relative;display:inline-block}.att img{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--bd)}.att.big img{width:90px;height:90px}.att .x{position:absolute;top:-6px;right:-6px;background:var(--pn);border:1px solid var(--bd);border-radius:50%;padding:0 5px;font-size:14px}
-.seg{display:flex;border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:6px}.seg button{flex:1;background:none;border:0;padding:8px 6px;color:var(--tx);cursor:pointer;font-size:13px}.seg button.on{background:var(--ac);color:#fff}
+.seg{display:flex;border:1px solid var(--bd);border-radius:10px;overflow-x:auto;margin-bottom:6px}.seg button{flex:1;background:none;border:0;padding:8px 6px;color:var(--tx);cursor:pointer;font-size:13px}.seg button.on{background:var(--ac);color:#fff}
 .rc{border:1px solid var(--bd);border-radius:10px;padding:8px 10px;margin:8px 0}
 .kc{border:1px solid var(--bd);border-radius:10px;padding:8px 10px;margin:8px 0}.kh{display:flex;justify-content:space-between;align-items:center}.kr{display:flex;gap:6px;margin-top:6px}
 .mp select,.mp input{margin-top:4px}
@@ -178,3 +177,30 @@ body.mob .f.c3{grid-column:span 2}
 .facethumb{width:80px;height:100px;object-fit:cover;border-radius:40px/50px;border:2px solid var(--bd);background:var(--ch)}
 .fpad{display:grid;grid-template-columns:repeat(2,34px);gap:4px}.fpad .c{padding:4px 0;text-align:center}
 .facebox{display:flex;gap:10px;align-items:center;margin-top:8px;padding:8px;background:var(--ch);border-radius:10px}
+
+/* 가로 스크롤 영역: 얇은 스크롤바 + 양끝 그림자로 '더 있음' 표시 */
+.hs{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:var(--bd) transparent;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scroll-behavior:smooth;position:relative}
+.hs::-webkit-scrollbar{height:5px}.hs::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}.hs::-webkit-scrollbar-track{background:transparent}
+.hs>*{flex-shrink:0}
+.hs.fl{-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 26px);mask-image:linear-gradient(90deg,transparent 0,#000 26px)}
+.hs.fr{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent 100%);mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent 100%)}
+.hs.fl.fr{-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 26px,#000 calc(100% - 26px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 26px,#000 calc(100% - 26px),transparent 100%)}
+.hs.drag{scroll-behavior:auto;cursor:grabbing}
+.hs.drag *{pointer-events:none}
+.seg button{white-space:nowrap;flex:1 0 auto}
+/* 패널·모달 안에서 넘치는 내용은 가로로도 스크롤 */
+#p>section,.mdl-b,.sv-box{overflow-x:auto}
+/* 회전 컨트롤 */
+.rotw{border:1px solid var(--bd);border-radius:10px;padding:6px;margin:6px 0;background:var(--bg)}
+.rotq{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding-bottom:5px}.rotq.c3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.rotq button{padding:6px 2px;font-size:12px;white-space:nowrap;min-width:0}
+.rotc{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.rotc .rotin{width:64px;flex:none;padding:5px 6px;border:1px solid var(--bd);border-radius:6px;background:var(--pn);color:var(--tx);font-size:13px;text-align:right}
+.rotc .u{font-size:12px;color:var(--mu);margin-left:-2px}
+.rotc .rotdir{width:auto;flex:none;padding:5px 4px;border:1px solid var(--bd);border-radius:6px;background:var(--pn);color:var(--tx);font-size:12px}
+.rotc button{padding:5px 10px;font-size:12px}
+.rotcur{font-size:11px;color:var(--mu);margin-left:auto;white-space:nowrap}
+#qbrot{flex-basis:100%;width:100%}
+#qbrot .rotw{margin:4px 0 0;max-width:min(440px,calc(100vw - 40px))}
+.chatlog{overflow-wrap:anywhere}
+#qb{z-index:6}
