@@ -37,6 +37,7 @@ export async function saveFile(name, data, type, { preview } = {}) {
   const m = ensureModal(), url = URL.createObjectURL(blob);
   m.dataset.url = url; m.querySelector('.sv-t').textContent = name;
   m.querySelector('.sv-img').innerHTML = img ? `<img src="${url}" alt="${name}">` : '<p>파일이 준비되었습니다.</p>';
+  const pi = m.querySelector('.sv-img img'); if (pi) { pi.style.cursor = 'zoom-in'; pi.onclick = () => import('./viewer.js').then(v => v.viewImg(url, name)); }
   m.querySelector('.sv-hint').textContent = img ? (isIOS() ? '‘공유 · 사진에 저장’을 누르거나, 이미지를 길게 눌러 ‘사진 앱에 저장’을 선택하세요.' : '‘공유·저장’ 또는 ‘다운로드’를 누르세요. 이미지를 길게 눌러 저장할 수도 있습니다.') : '';
   const btns = m.querySelector('.sv-btns'); btns.innerHTML = '';
   const b1 = document.createElement('button'); b1.className = 'b'; b1.textContent = '공유 · 사진에 저장';

@@ -336,3 +336,15 @@ body.mob .rsz span{width:64px;height:6px}
 .xrr{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--bd);border-radius:10px;padding:6px;background:var(--bg)}
 .xrr img{width:92px;height:92px;object-fit:cover;border-radius:8px;flex:none}
 .xrf{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}.xrf select,.xrf input{width:100%;box-sizing:border-box}
+/* 전체 화면 이미지 뷰어 */
+.lbx{position:fixed;inset:0;z-index:150;background:#000;opacity:0;transition:opacity .15s;touch-action:none;overscroll-behavior:contain;cursor:zoom-out;user-select:none;-webkit-user-select:none}
+.lbx.on{opacity:1}
+.lbx img{position:absolute;left:50%;top:50%;max-width:none;max-height:none;transform:translate(-50%,-50%);transform-origin:center;-webkit-user-drag:none;pointer-events:none;image-rendering:auto}
+.lbx-bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:calc(8px + env(safe-area-inset-top,0px)) calc(10px + env(safe-area-inset-right,0px)) 8px calc(12px + env(safe-area-inset-left,0px));background:linear-gradient(rgba(0,0,0,.55),transparent);pointer-events:none}
+.lbx-t{flex:1;color:#fff;font-size:13px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbx-bar button{pointer-events:auto;border:0;border-radius:999px;background:rgba(255,255,255,.16);color:#fff;font-size:14px;height:40px;min-width:40px;padding:0 12px;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.lbx-bar .lbx-x{font-size:20px;width:44px;height:44px;padding:0}
+.lbx-bar button:hover{background:rgba(255,255,255,.28)}
+.lbx-hint{position:absolute;bottom:calc(12px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);color:#fff;font-size:12px;opacity:.6;background:rgba(0,0,0,.35);padding:4px 10px;border-radius:999px;pointer-events:none;animation:lbxh 3s forwards}
+@keyframes lbxh{0%,70%{opacity:.6}100%{opacity:0}}
+.refg img,.sv-img img{cursor:zoom-in}

@@ -14,6 +14,7 @@ import { initHScroll, reveal } from './hscroll.js';
 import { ENVS, ENV_DEF, GROUNDS, groundTex, skyTex, FOGC, buildEnv } from './env.js';
 import { putRef, getRef, delRef, uploadMissing, REF_KINDS } from './refs.js';
 import { fileToDataURL } from './ai.js';
+import { viewImg } from './viewer.js';
 import { RUG_PAT, RUG_SHAPE, rugCanvas, rugThumb, rugDesc } from './rugs.js';
 
 const $ = id => document.getElementById(id);
@@ -2045,7 +2046,7 @@ function refsSection(target) {
   fi.onchange = () => { addFiles([...fi.files]); fi.value = ''; }; cam.onchange = () => { addFiles([...cam.files]); cam.value = ''; };
   const refs = o.refs || [];
   const grid = h('div', { class: 'refg' }, refs.map((r, i) => {
-    const img = h('img', { alt: '참고 사진' }); getRef(r.id).then(src => { if (src) img.src = src; else img.alt = '(이 기기에 없음)'; });
+    const img = h('img', { alt: '참고 사진', onclick: () => img.src && viewImg(img.src, r.note || '참고 사진') }); getRef(r.id).then(src => { if (src) img.src = src; else img.alt = '(이 기기에 없음)'; });
     const ks = h('select', {}, kinds.map(([k, n]) => h('option', { value: k }, n))); ks.value = r.kind; ks.onchange = () => { r.kind = ks.value; commitSoon(0); };
     const nt = h('input', { type: 'text', placeholder: '메모 (예: 이 소파의 패브릭)', value: r.note || '' }); nt.onchange = () => { r.note = nt.value.trim() || undefined; commitSoon(0); };
     return h('div', { class: 'refc' }, h('div', { class: 'refi', onclick: () => { if (img.src) mdl('참고 사진', h('img', { src: img.src, class: 'full' })); } }, img), ks, nt,

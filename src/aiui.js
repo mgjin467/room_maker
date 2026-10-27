@@ -4,6 +4,7 @@ import { Cloud, parseCfg, saveCfg, loadCfg, RULES, cfgLink, cfgFileCode, BUILTIN
 import qrcode from 'qrcode-generator';
 import { cropFace, centerBox, sampleSkin } from './faces.js';
 import { getRef, putRef, REF_KINDS, REF_EN } from './refs.js';
+import { viewImg } from './viewer.js';
 
 const K_KEYS = 'room3d.v2.aikeys', K_MODELS = 'room3d.v2.aimodels', K_EXTRA = 'room3d.v2.aiextra', K_CHAT = 'room3d.v2.chat';
 const ASPECTS = [['1:1', 1], ['2:3', 2 / 3], ['3:2', 1.5], ['3:4', 0.75], ['4:3', 4 / 3], ['4:5', 0.8], ['5:4', 1.25], ['9:16', 9 / 16], ['16:9', 16 / 9], ['21:9', 21 / 9]];
@@ -476,7 +477,7 @@ ${sceneText(viewKey)}`;
     };
     const showResult = (card, url, cap, name, W, H) => {
       card.innerHTML = '';
-      const img = h('img', { src: url, alt: name, onclick: () => modal(name, h('img', { src: url, class: 'full' }), { wide: true }) });
+      const img = h('img', { src: url, alt: name, onclick: () => viewImg(img.src, name) });
       const file = A.fname(`${name}_${W}x${H}.png`.replace(/\s|·/g, ''));
       app(card, img, h('small', {}, `${name} · ${W}×${H}`),
         h('div', { class: 'r' }, BTN('저장·공유', () => A.saveFile(file, url, 'image/png', { preview: A.isMobile() }), 'c'),
@@ -492,7 +493,7 @@ ${sceneText(viewKey)}`;
     try {
       const ls = await Cloud.listGallery(); body.innerHTML = '';
       if (!ls.length) body.append(h('p', { class: 'mu' }, '저장된 이미지가 없습니다.'));
-      ls.forEach(g => body.append(h('div', { class: 'rcard' }, h('img', { src: g.img, onclick: () => modal(g.name, h('img', { src: g.img, class: 'full' }), { wide: true }) }), h('small', {}, `${g.project || ''} · ${g.name || ''} · ${new Date(g.t).toLocaleString('ko-KR')}`),
+      ls.forEach(g => body.append(h('div', { class: 'rcard' }, h('img', { src: g.img, onclick: () => viewImg(g.img, g.name || '') }), h('small', {}, `${g.project || ''} · ${g.name || ''} · ${new Date(g.t).toLocaleString('ko-KR')}`),
         h('div', { class: 'r' }, BTN('저장·공유', () => A.saveFile(`${g.project || 'room'}_${g.name || 'render'}.jpg`, g.img, 'image/jpeg', { preview: A.isMobile() }), 'c'), BTN('삭제', async e => { if (!confirm('삭제할까요?')) return; await Cloud.delGallery(g.id); e.target.closest('.rcard').remove(); }, 'c')))));
     } catch (e) { body.innerHTML = ''; body.append(h('p', { class: 'warn' }, e.message)); }
   }
