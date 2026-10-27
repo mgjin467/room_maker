@@ -78,6 +78,14 @@ const BOOK = [0x8c3b2e, 0x2f4f6f, 0x6b7d3a, 0xc9a46a, 0x5b4636, 0x9a8f84, 0x3d5a
 const FLOW = [0xe86a92, 0xf2c14e, 0xffffff, 0xd7263d, 0xf49ac2, 0x9b5de5, 0xff8c42];
 const ART = [0xd98b5f, 0x5f8fa8, 0xe9c46a, 0x2a9d8f, 0x264653, 0xe76f51, 0xf4a261, 0x8e7dbe, 0xf1faee];
 
+// 러그: 위쪽 면에 무늬 텍스처(tex:'rug') — 모양 it.rs: rect|round|oval|hex|oct|half
+function buildRug(it, w, def) {
+  const { d } = it, th = Math.max(0.4, it.h || 1), sh = it.rs || def, top = 0.15, o = { tex: 'rug' };
+  if (sh === 'rect') { B(0, 0, 0, w, th - top, d, 'd'); B(0, th - top, 0, w, top, d, null, o); return; }
+  if (sh === 'half') { const so = { ts: -PI / 2, tl: PI, sz: d / (w / 2), seg: 48 }; C(0, 0, -d / 2, w / 2, w / 2, th - top, 'd', so); C(0, th - top, -d / 2, w / 2, w / 2, top, null, { ...so, ...o }); return; }
+  const seg = sh === 'hex' ? 6 : sh === 'oct' ? 8 : 64, so = { sz: d / w, seg, ts: seg < 10 ? PI / seg : 0 };
+  C(0, 0, 0, w / 2, w / 2, th - top, 'd', so); C(0, th - top, 0, w / 2, w / 2, top, null, { ...so, ...o });
+}
 function leaf(it, w) { if (it.fold && LEAF[it.type]) { const l = it.w - w; B(w / 2 - 1, it.h - 3 - l, 0, 2, l, it.d - 4); } }
 function frame(w, d, h, i, c) { B(0, h - 9, d / 2 - i, w - 2 * i, 6, 2, c); B(0, h - 9, -d / 2 + i, w - 2 * i, 6, 2, c); B(w / 2 - i, h - 9, 0, 2, 6, d - 2 * i, c); B(-w / 2 + i, h - 9, 0, 2, 6, d - 2 * i, c); }
 export const COLSTY = {
@@ -466,8 +474,8 @@ const BUILD = {
   vase: (it, w) => { const { h } = it, m = Math.min(w, it.d); S(0, h * 0.35, 0, m / 2, null, { sy: (h * 0.7) / m, ws: 20, hs: 14 }); C(0, h * 0.6, 0, m * 0.16, m * 0.22, h * 0.4, null, { seg: 16 }); },
   basket: (it, w) => { const { d, h } = it; C(0, 0, 0, w / 2, w / 2 * 0.86, h, null, { sz: d / w, seg: 24 }); C(0, h - 0.3, 0, w / 2 - 1.5, w / 2 - 1.5, 0.4, 'd', { sz: d / w, seg: 24 }); T(0, h, 0, w / 2, 0.8, 'd', { rx: PI / 2, sy: d / w }); },
   books: (it, w) => { const { d, h } = it, r = rng(it.id || 1); let y = 0; while (y < h - 1.5) { const bh = 2 + r() * 2.5; B((r() - 0.5) * 3, y, (r() - 0.5) * 2, w * (0.75 + r() * 0.25), Math.min(bh, h - y), d * (0.75 + r() * 0.25), y === 0 ? null : BOOK[(r() * BOOK.length) | 0], { ry: (r() - 0.5) * 0.3 }); y += bh; } },
-  rug: (it, w) => { const { d, h } = it, bw = Math.min(16, w * 0.1), bd = Math.min(16, d * 0.1); B(0, 0, 0, w, h, d, 'a'); B(0, h, 0, w - bw, 0.12, d - bd, null); B(0, h + 0.1, 0, (w - bw) * 0.45, 0.08, (d - bd) * 0.45, 'a', { ry: 0 }); },
-  rugR: (it, w) => { const { d, h } = it, s = d / w; C(0, 0, 0, w / 2, w / 2, h, 'a', { sz: s, seg: 56 }); C(0, h, 0, w / 2 * 0.88, w / 2 * 0.88, 0.12, null, { sz: s, seg: 56 }); C(0, h + 0.1, 0, w / 2 * 0.35, w / 2 * 0.35, 0.08, 'a', { sz: s, seg: 40 }); },
+  rug: (it, w) => buildRug(it, w, 'rect'),
+  rugR: (it, w) => buildRug(it, w, 'round'),
   curtainI: (it, w) => { const { d, h } = it, n = Math.max(4, Math.round(w / 12)), pw = w / n; B(0, h - 3, -d / 2 + 2, w + 12, 2.5, 2.5, CH); for (let i = 0; i < n; i++) B(-w / 2 + pw * (i + 0.5), 0, (i % 2 ? 0.2 : -0.2) * d * 0.6, pw * 1.05, h - 4, d * 0.35, i % 2 ? null : 'f'); },
   frame: (it, w) => {
     const { d, h } = it, n = it.n || 1, gp = n > 1 ? 8 : 0, fw = (w - gp * (n - 1)) / n, r = rng((it.id || 1) * 13);

@@ -297,3 +297,35 @@ body.mob .spcpill{top:calc(62px + env(safe-area-inset-top,0px));left:8px;font-si
 .refc .x{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;border:0;border-radius:50%;width:22px;height:22px;line-height:20px;cursor:pointer}
 .rkind{min-width:110px}
 img.full{max-width:100%;height:auto;display:block;margin:auto}
+/* 러그 */
+.rugbox{border:1px solid var(--bd);border-radius:10px;padding:8px 10px;margin:8px 0}
+.rugbox h4{margin-top:0}
+.rugpats{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:6px;max-height:300px;overflow-y:auto;padding:2px}
+.rugp{display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid var(--bd);border-radius:8px;padding:4px;background:var(--pn);cursor:pointer;color:var(--tx)}
+.rugp img{width:100%;height:auto;border-radius:4px;display:block}
+.rugp span{font-size:10.5px;line-height:1.2;text-align:center}
+.rugp.on{border-color:var(--ac);box-shadow:0 0 0 2px var(--ac)}
+/* 대화 입력창 · 크기 조절 */
+.chatin{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+.chatin textarea{width:100%;box-sizing:border-box;min-height:96px;font-size:15px;line-height:1.5;padding:10px 12px;resize:vertical;border-radius:10px}
+.chatbar{display:flex;gap:6px;align-items:center}.chatbar .grow{flex:1;text-align:center;font-size:11px}
+.chatbar #chatsend{padding:10px 22px;font-size:15px}
+.rsz{height:18px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;touch-action:none;user-select:none;-webkit-user-select:none}
+.rsz span{width:56px;height:5px;border-radius:3px;background:var(--bd)}
+.rsz:hover span,.rsz.on span{background:var(--ac)}
+.chatlog{margin-bottom:0}
+body.mob .chatin textarea{min-height:110px;font-size:16px}
+body.mob .rsz{height:26px}
+body.mob .rsz span{width:64px;height:6px}
+/* 알림 배너 */
+#toast{display:none!important}
+#notes{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:6px;width:min(560px,calc(100vw - 16px));pointer-events:none}
+.note{pointer-events:auto;display:flex;align-items:center;gap:9px;padding:10px 10px 10px 12px;border-radius:12px;background:var(--pn);color:var(--tx);border:1px solid var(--bd);box-shadow:0 8px 28px rgba(0,0,0,.18);font-size:13.5px;line-height:1.4;animation:nin .22s ease;cursor:pointer;border-left:5px solid #6b7280}
+.note.ok{border-left-color:#2b9348}.note.err{border-left-color:var(--rd);background:color-mix(in srgb,var(--pn) 92%,#e5484d)}.note.info{border-left-color:var(--ac)}
+.note .ni{flex:none;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff;background:#6b7280}
+.note.ok .ni{background:#2b9348}.note.err .ni{background:var(--rd)}.note.info .ni{background:var(--ac)}
+.note .nt{flex:1;min-width:0;overflow-wrap:anywhere}
+.note .na{flex:none;background:var(--ac);color:#fff;border:0;border-radius:8px;padding:6px 12px;font-weight:600;cursor:pointer}
+.note .nx{flex:none;background:none;border:0;color:var(--mu);font-size:18px;line-height:1;cursor:pointer;padding:0 4px}
+.note.out{opacity:0;transform:translateY(-6px);transition:all .2s}
+@keyframes nin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}

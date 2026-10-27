@@ -49,7 +49,11 @@ function BX(p, sx, sy, sz, x, y0, z, c, o = {}) {
   if (o.rx) m.rotation.x = o.rx;
   p.add(m); return m;
 }
+// 유리 투명도·색 (창호마다 설정: o.gop 0~100% 투명, o.gtint)
+export const GTINT = [['clear', '투명 (클리어)', 0x9db4c8], ['low', '저철분 (아주 맑음)', 0xc9dde6], ['bronze', '브론즈', 0x8a6a4a], ['gray', '그레이', 0x5b6068], ['black', '블랙 (짙은 틴트)', 0x22262b], ['frost', '반투명 (불투명 유리)', 0xe8eef0], ['mist', '모루·간유리', 0xd9e2e6]];
+let GCUR = null;
 function GLS(p, w, h, x, y0, z, op = 0.28, c = 0x9db4c8) {
+  if (GCUR) { if (GCUR.op != null) op = GCUR.op; if (GCUR.c != null) c = GCUR.c; }
   const m = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(0.5, w), Math.max(0.5, h)), M(c, { op }));
   m.position.set(x, y0 + h / 2, z); p.add(m); return m;
 }
@@ -160,8 +164,10 @@ function buildDoor(o, R, g) {
 }
 
 export function buildOpening(o, R) {
-  const g = new THREE.Group();
+  const g = new THREE.Group(), tint = GTINT.find(t => t[0] === o.gtint);
+  GCUR = o.gop != null || tint ? { op: o.gop != null ? Math.max(0.03, Math.min(1, 1 - o.gop / 100)) : (tint && (tint[0] === 'frost' || tint[0] === 'mist') ? 0.82 : null), c: tint ? tint[2] : null } : null;
   if (o.kind === 'win') buildWin(o, R, g); else buildDoor(o, R, g);
+  GCUR = null;
   return g;
 }
 

@@ -37,7 +37,7 @@ export function parseKeys(text) {
 
 async function jfetch(url, opt) {
   const r = await fetch(url, opt); const txt = await r.text(); let j = null; try { j = JSON.parse(txt); } catch (e) { }
-  if (!r.ok) { const m = (j && (j.error?.message || j.error?.type || j.message)) || txt.slice(0, 300); throw new Error(`${r.status} ${m}`); }
+  if (!r.ok) { const m = (j && (j.error?.message || j.error?.type || j.message)) || txt.slice(0, 300); const e = new Error(`${r.status} ${m}`); if (/safety|moderation|content[_ ]policy|safety_violations|blocked/i.test(m)) e.safety = true; throw e; }
   return j;
 }
 const b64 = d => String(d).split(',')[1];
@@ -83,7 +83,7 @@ export async function aiImage({ provider, model, key, prompt, image, refs = [], 
     const parts = [...[image, ...refs].filter(Boolean).map(im => ({ inline_data: { mime_type: mime(im), data: b64(im) } })), { text: prompt }];
     const j = await jfetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: aspect } } }) });
     const p = (j.candidates?.[0]?.content?.parts || []).find(x => x.inlineData || x.inline_data);
-    if (!p) throw new Error('이미지가 생성되지 않았습니다. ' + ((j.candidates?.[0]?.content?.parts || []).map(x => x.text).join(' ').slice(0, 200) || j.candidates?.[0]?.finishReason || ''));
+    if (!p) { const why = (j.candidates?.[0]?.content?.parts || []).map(x => x.text).join(' ').slice(0, 200) || j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || ''; const e = new Error('이미지가 생성되지 않았습니다. ' + why); if (/SAFETY|PROHIBITED|BLOCK|IMAGE_SAFETY|policy/i.test(why)) e.safety = true; throw e; }
     const d = p.inlineData || p.inline_data; return `data:${d.mimeType || d.mime_type || 'image/png'};base64,${d.data}`;
   }
   if (provider === 'openai') {
@@ -93,7 +93,9 @@ export async function aiImage({ provider, model, key, prompt, image, refs = [], 
       const fd = new FormData(); fd.append('model', model); fd.append('prompt', prompt); fd.append('size', size); fd.append('quality', quality);
       const all = [image, ...refs].filter(Boolean), key2 = all.length > 1 ? 'image[]' : 'image';
       for (let i = 0; i < all.length; i++) { const blob = await (await fetch(all[i])).blob(); fd.append(key2, new File([blob], i ? `ref${i}.jpg` : 'scene.png', { type: blob.type || 'image/png' })); }
-      j = await jfetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
+      fd.append('input_fidelity', 'high'); fd.append('moderation', 'low');
+      try { j = await jfetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd }); }
+      catch (e) { if (!/input_fidelity|moderation|unknown parameter|unrecognized/i.test(e.message)) throw e; fd.delete('input_fidelity'); fd.delete('moderation'); j = await jfetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd }); }
     } else j = await jfetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify({ model, prompt, size, quality }) });
     const d = j.data?.[0]; if (!d) throw new Error('이미지가 생성되지 않았습니다');
     return d.b64_json ? 'data:image/png;base64,' + d.b64_json : d.url;

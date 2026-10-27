@@ -153,7 +153,8 @@ JSON 하나만:
       const j = parseJSON(out), acts = Array.isArray(j.actions) ? j.actions : [];
       const log = acts.length ? A.runActions(acts) : [];
       pushMsg('assistant', j.reply || (acts.length ? '적용했습니다.' : '…'), { log, undo: acts.length > 0 });
-    } catch (e) { pushMsg('sys', '⚠ ' + e.message); }
+      toast(acts.length ? `✅ AI가 ${acts.length}개 작업을 적용했습니다${log.length ? ' — ' + log.slice(0, 2).join(' · ') : ''}` : `💬 AI 답변: ${(j.reply || '').slice(0, 60)}`, 6000, acts.length ? ['되돌리기', () => document.getElementById('undo').click()] : ['보기', () => A.showTab('ai')], { type: acts.length ? 'ok' : 'info', sys: true });
+    } catch (e) { pushMsg('sys', '⚠ ' + e.message); toast('⚠ AI 대화 오류: ' + e.message, 8000, null, { type: 'err' }); }
     busy = false; setBusy(false);
   }
   function setBusy(b) { const s = document.getElementById('chatsend'); if (s) { s.disabled = b; s.textContent = b ? '…' : '보내기'; } const l = document.getElementById('chatbusy'); if (l) l.hidden = !b; }
@@ -171,7 +172,7 @@ JSON 하나만:
   }
   function render() {
     const b = document.getElementById('t-ai'); b.innerHTML = '';
-    const m = modelFor('chat'), ta = h('textarea', { rows: 2, placeholder: '무엇을 할까요? (예: 창가에 1인 소파 추가)', enterkeyhint: 'send' });
+    const m = modelFor('chat'), ta = h('textarea', { rows: 4, placeholder: '무엇을 할까요? (예: 창가에 1인 소파 추가)\nEnter 보내기 · Shift+Enter 줄바꿈', enterkeyhint: 'send', id: 'chatta' });
     ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value; ta.value = ''; send(v); } });
     const fi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
     fi.onchange = async () => { for (const f of fi.files) attach.push(await fileToDataURL(f, 1400)); fi.value = ''; drawAttach(); };
@@ -181,13 +182,30 @@ JSON 하나만:
         BTN('📷 사진으로 가구 추가', () => openPhoto('furniture'), 'b'), BTN('👤 사진에서 사람 추가', () => openPhoto('people'), 'o'), BTN('🏠 공간·도면·야외 인식', () => openPhoto('room'), 'o'),
         BTN('🎨 실사 이미지 만들기', () => openRender(), 'b'), BTN('🖼 갤러리', openGallery, 'o'), BTN('⚙ AI 설정', openSettings, 'o')),
       h('div', { class: 'mu sm' }, `대화 모델: ${PROVIDERS[m.provider]?.name} · ${m.model}`, m.key ? '' : ' — ⚠ 키 없음'),
-      h('div', { id: 'chatlog', class: 'chatlog' }),
+      h('div', { id: 'chatlog', class: 'chatlog' }), h('div', { class: 'rsz', id: 'logrsz', title: '끌어서 대화창 크기 조절' }, h('span')),
       h('div', { id: 'chatbusy', class: 'mu sm', hidden: true }, 'AI가 생각하는 중…'),
       h('div', { class: 'chips' }, chips.map(c => h('button', { class: 'c', onclick: () => send(c) }, c))),
       h('div', { id: 'chatatt', class: 'attrow' }),
-      h('div', { class: 'chatin' }, h('button', { class: 'c ic', title: '사진 첨부', onclick: () => fi.click() }, '📎'), h('button', { id: 'chatmic', class: 'c ic', title: '음성 입력', onclick: () => voice(ta) }, '🎤'), ta, h('button', { id: 'chatsend', class: 'b', onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, '보내기'), fi),
+      h('div', { class: 'chatin' }, h('div', { class: 'rsz', id: 'tarsz', title: '끌어서 입력창 크기 조절' }, h('span')), ta,
+        h('div', { class: 'chatbar' }, h('button', { class: 'c ic', title: '사진 첨부', onclick: () => fi.click() }, '📎'), h('button', { id: 'chatmic', class: 'c ic', title: '음성 입력', onclick: () => voice(ta) }, '🎤'),
+          h('span', { class: 'mu sm grow' }, '⇕ 위 막대를 끌어 크기 조절'), h('button', { id: 'chatsend', class: 'b', onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, '보내기'), fi)),
       h('div', { class: 'r' }, BTN('대화 지우기', () => { CHAT = []; LS.set(K_CHAT, CHAT); drawChat(); }, 'c')));
     drawChat(); drawAttach();
+    // 크기 조절 (마우스·터치 모두) — 크기는 이 기기에 기억
+    const fitH = () => { const lh = LS.get('room3d.v2.chatH', null), th = LS.get('room3d.v2.taH', null); const log = document.getElementById('chatlog'); if (lh && log) { log.style.height = lh + 'px'; log.style.maxHeight = 'none'; } if (th) ta.style.height = th + 'px'; };
+    fitH();
+    const drag = (handle, el, key, min, sign) => {
+      if (!handle || !el) return;
+      handle.addEventListener('pointerdown', e => {
+        e.preventDefault(); handle.setPointerCapture(e.pointerId); const y0 = e.clientY, h0 = el.getBoundingClientRect().height; handle.classList.add('on');
+        const mv = ev => { const v = Math.max(min, Math.min(window.innerHeight * 0.85, h0 + sign * (ev.clientY - y0))); el.style.height = v + 'px'; el.style.maxHeight = 'none'; };
+        const up = () => { handle.removeEventListener('pointermove', mv); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up); handle.classList.remove('on'); LS.set(key, Math.round(el.getBoundingClientRect().height)); };
+        handle.addEventListener('pointermove', mv); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
+      });
+      handle.addEventListener('dblclick', () => { el.style.height = ''; el.style.maxHeight = ''; LS.set(key, null); });
+    };
+    drag(document.getElementById('logrsz'), document.getElementById('chatlog'), 'room3d.v2.chatH', 80, 1);
+    drag(document.getElementById('tarsz'), ta, 'room3d.v2.taH', 60, -1);
   }
 
   // ---------- 사진 인식 ----------
@@ -219,7 +237,8 @@ JSON 하나만:
         result = parseJSON(out);
         if (mode === 'furniture') (result.items || []).forEach(it => { it._on = true; it._v = -1; });
         if (mode === 'people') { for (const p of (result.people || [])) { p._on = true; p._faceOn = true; p._adj = { dx: 0, dy: 0, s: 1 }; p.height = p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180; const src = imgs[Math.min(imgs.length - 1, Math.max(0, p.img | 0))]; p._src = src; if (Array.isArray(p.face_box) && p.face_box.length === 4) { try { p.face = await cropFace(src, p.face_box, p._adj); p.skin = await sampleSkin(p.face); } catch (e) { } } } }
-      } catch (err) { toast('⚠ ' + err.message, 7000); }
+      } catch (err) { toast('⚠ 인식 실패: ' + err.message, 8000, null, { type: 'err', sys: true }); }
+      if (result) toast(mode === 'furniture' ? `✅ 인식 완료 — 가구·소품 ${(result.items || []).length}개` : mode === 'people' ? `✅ 인식 완료 — 사람 ${(result.people || []).length}명` : `✅ 공간 인식 완료 — ${(result.space || {}).name || ''}`, 5000, null, { type: 'ok', sys: true });
       draw();
     };
     const showResult = () => {
@@ -330,15 +349,19 @@ JSON 하나만:
     L.push(`Floor: ${A.floorName(r.floor.type) || r.floor.type} (${r.floor.color}), plank/tile direction ${r.floor.dir}°. Walls: ${r.wallColor}${r.walls.some(w => w.color !== r.wallColor) ? ', accent walls ' + r.walls.filter(w => w.color !== r.wallColor).map(w => w.label + ' ' + w.color).join(', ') : ''}.`);
     }
     if (sp.kind !== 'outdoor') L.push(`Windows/doors: ${d.openings.map(o => `${o.label} ${o.stName} ${o.w}x${o.h}cm on ${o.wall}${o.kind === 'win' && o.curtain && o.curtain !== 'none' ? ' with ' + o.curtain : ''}${o.open ? ' (open ' + o.open + ')' : ''}`).join('; ') || 'none'}. View outside windows: ${r.outsideView}, ${r.viewTime === 'auto' ? (r.night ? 'night' : 'daytime') : r.viewTime}.`);
-    L.push('Furniture & objects (exact sizes, keep them): ' + d.items.map(i => `${i.desc ? '(' + i.desc + ') ' : ''}${i.name} [${A.TYPES[i.type] || i.type}] ${i.w}x${i.d}x${i.h}cm, color ${i.color}${i.c2 ? '/' + i.c2 : ''}${i.mat ? ', material ' + A.matName(i.mat) : ''}${i.mat2 ? '/' + A.matName(i.mat2) : ''}${i.type === 'person' ? `, a ${i.sex === 'f' ? 'woman' : i.sex === 'c' ? 'child' : 'man'} ${i.h}cm tall in ${i.outfit}` : ''}${i.on === false ? ', lamp OFF' : i.on ? `, lamp ON ${Math.round((i.lum ?? 0.8) * 100)}%` : ''}`).join('; ') + '.');
+    L.push('Furniture & objects (exact sizes, keep them): ' + d.items.map(i => `${i.desc ? '(' + i.desc + ') ' : ''}${i.name} [${A.TYPES[i.type] || i.type}] ${i.w}x${i.d}x${i.h}cm, color ${i.color}${i.c2 ? '/' + i.c2 : ''}${i.mat ? ', material ' + A.matName(i.mat) : ''}${i.mat2 ? '/' + A.matName(i.mat2) : ''}${i.type === 'person' ? `, ${personEN(i)}` : ''}${i.on === false ? ', lamp OFF' : i.on ? `, lamp ON ${Math.round((i.lum ?? 0.8) * 100)}%` : ''}`).join('; ') + '.');
     L.push('Lighting fixtures: ' + (d.lights.map(l => `${l.kindName} ${l.on && l.lum > 0 ? `ON at ${Math.round(l.lum * 100)}% brightness, ${l.temp}K` : 'OFF (dark)'}`).join('; ') || 'none') + `. Overall: ${r.night ? 'NIGHT — room lit only by the listed lights that are ON; lights that are OFF must stay dark' : 'DAYTIME — natural light through windows plus listed lights'}.`);
     L.push(`Camera: ${{ cur: 'same as the input image', door: 'from the entrance looking in', iso: 'elevated three-quarter view', isoL: 'elevated three-quarter view from the left', top: 'top-down view', sel: 'close-up' }[viewKey] || 'eye-level from a corner of the room (150cm high)'}.`);
     return L.join('\n');
   }
+  const OUTFIT_EN = { suit: 'a business suit', suit3: 'a three-piece suit', tux: 'a tuxedo', casual: 'a shirt and trousers', tshirt: 'a t-shirt and shorts', hoodie: 'a hoodie and trousers', knit: 'a knit sweater and trousers', sport: 'a tracksuit', coat: 'a long coat', blouse: 'a blouse and skirt', dress: 'a dress', longdress: 'a long dress', gown: 'a white wedding gown', mermaid: 'a long fitted evening gown', hanbok: 'a traditional Korean hanbok', hanbokM: 'a traditional Korean hanbok', beachM: 'a Hawaiian shirt and shorts', tank: 'a casual top and shorts', rash: 'a long-sleeve rash guard and board shorts', swimF: 'a one-piece swimsuit with a beach cover-up', apron: 'work clothes with an apron', blazer: 'a blazer and slacks', jeans: 'a t-shirt and jeans' };
+  const BUILD_EN = { slim: 'slim build', muscle: 'athletic build', curvy: 'medium build', plump: 'sturdy build', petite: 'petite build' };
+  const personEN = (i, plain) => `a ${i.sex === 'f' ? 'woman' : i.sex === 'c' ? 'child' : 'man'} about ${i.h}cm tall wearing ${OUTFIT_EN[i.outfit] || 'everyday clothes'} (clothing colors ${[i.color, i.c2].filter(Boolean).join(' and ')}, with shoes)${!plain && BUILD_EN[i.body] ? ', ' + BUILD_EN[i.body] : ''}${(POSE_EN[i.pose] ? ', ' + POSE_EN[i.pose] : '')}`;
+  const POSE_EN = { sit: 'seated', sitW: 'seated, waving', walk: 'walking', wave: 'waving', cross: 'arms crossed', hips: 'hands on hips', point: 'pointing', cheer: 'arms raised', hold: 'hands together' };
   function renderPrompt(viewKey, o) {
     const out = (A.describe().space || {}).kind === 'outdoor';
     return `Transform this 3D ${out ? 'outdoor scene layout' : 'interior layout'} render into a single photorealistic ${out ? 'outdoor' : 'interior'} photograph.
-STRICT RULES: keep the EXACT same camera angle, framing, perspective and room geometry; keep every piece of furniture, object, person, window and door in exactly the same position, size, proportion, shape, color and material as in the input; do not move, add or remove furniture${o.decor ? ' (you MAY add a few small decorative accessories like books, cushions, a throw, small vases)' : ' and do not add new objects'}. Replace simplified geometry with realistic real-world equivalents of the same design (e.g. a box labeled bookshelf becomes a real bookshelf of the same size). Respect the lighting state exactly: fixtures that are OFF stay dark, dimmed lights stay dim. Realistic global illumination, soft shadows, accurate materials, natural textures, 35mm lens look, high dynamic range, no text, no watermark, no people unless people are present in the input.
+STRICT RULES: keep the EXACT same camera angle, framing, perspective and room geometry; windows and doors keep their exact wall, position, width, height and sill height (do not enlarge windows, do not turn walls into windows); foreground elements (e.g. a glass sliding door frame the camera looks through) stay in the foreground; keep every piece of furniture, object, person, window and door in exactly the same position, size, proportion, shape, color and material as in the input; do not move, add or remove furniture${o.decor ? ' (you MAY add a few small decorative accessories like books, cushions, a throw, small vases)' : ' and do not add new objects'}. Replace simplified geometry with realistic real-world equivalents of the same design (e.g. a box labeled bookshelf becomes a real bookshelf of the same size). Respect the lighting state exactly: fixtures that are OFF stay dark, dimmed lights stay dim. Realistic global illumination, soft shadows, accurate materials, natural textures, 35mm lens look, high dynamic range, no text, no watermark, no people unless people are present in the input.
 ${STYLEP[o.style] || ''} ${o.extra || ''}
 SCENE DATA:
 ${sceneText(viewKey)}`;
@@ -352,7 +375,7 @@ ${sceneText(viewKey)}`;
   function openRender(pre = {}) {
     const R = A.R, nCorner = Math.min(6, R.pts.length);
     const VIEWS = [['cur', '현재 화면'], ['door', '입구 시점'], ['iso', '대각선 (오른쪽)'], ['isoL', '대각선 (왼쪽)'], ['top', '위에서'], ...Array.from({ length: nCorner }, (_, i) => [`eye${i}`, `눈높이 · 모서리 ${i + 1}`]), ['sel', '선택 대상 클로즈업']];
-    const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high', useRefs: true, extraRefs: [] };
+    const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high', useRefs: true, extraRefs: [], guide: true };
     const nRefs = () => (A.R.refs || []).length + A.items.reduce((n, i) => n + (i.refUse === 0 ? 0 : (i.refs || []).length), 0);
     const xfi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }); xfi.onchange = async () => { for (const f of xfi.files) st.extraRefs.push(await fileToDataURL(f, 1000, 0.85)); xfi.value = ''; draw(); };
     const body = h('div', {}), res = h('div', { class: 'rgrid' });
@@ -370,20 +393,21 @@ ${sceneText(viewKey)}`;
           h('div', { class: 'ch' }, STYLES.map(([k, n]) => h('button', { class: 'c' + (st.style === k ? ' on' : ''), onclick: () => { st.style = k; draw(); } }, n))),
           F('추가 요청 (선택)', h('textarea', { rows: 2, placeholder: '예: 창밖에 비 오는 저녁, 벽에 은은한 간접조명 반사', oninput: e => { st.extra = e.target.value; } }, st.extra)),
           h('div', { class: 'cg' }, h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.decor, onchange: e => { st.decor = e.target.checked; } }), '작은 소품(쿠션·책 등) 추가 허용'),
+            h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.guide, onchange: e => { st.guide = e.target.checked; } }), '🧭 구조 고정 (창·문·가구 위치·크기 가이드를 함께 보내 왜곡 방지 — 권장)'),
             h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.useRefs, onchange: e => { st.useRefs = e.target.checked; } }), `📎 가구·사람·공간에 붙인 참고 사진 반영 (${nRefs()}장)`)),
           h('div', { class: 'r' }, BTN('📎 이번 렌더용 참고 사진 추가', () => xfi.click(), 'c'), xfi, st.extraRefs.length ? BTN(`참고 ${st.extraRefs.length}장 지우기`, () => { st.extraRefs = []; draw(); }, 'c') : null),
           st.extraRefs.length ? h('div', { class: 'attrow' }, st.extraRefs.map(s => h('span', { class: 'att' }, h('img', { src: s })))) : null,
           h('p', { class: 'mu sm' }, '참고 사진: 얼굴·옷·체형·자세(사람), 재질·모양(가구), 분위기(공간)를 실사 이미지에 맞춰 반영합니다. 선택 탭의 「📎 참고 사진」에서 객체마다 붙일 수 있습니다.'),
           F('이미지 모델', modelPicker('image', draw)),
           h('p', { class: 'mu sm' }, `${PROVIDERS[im.provider]?.name} · ${im.model}${im.key ? '' : ' — ⚠ 키 없음 (⚙ AI 설정)'} · 배치·크기·재질·조명 설정이 프롬프트에 그대로 들어갑니다.`)) : null,
-        h('div', { class: 'r' }, BTN(st.ai ? '🎨 생성 시작' : '📷 캡처', go, 'b'), BTN('프롬프트 보기', () => modal('프롬프트', h('pre', { class: 'pre' }, renderPrompt([...st.views][0] || 'cur', st))), 'c')),
+        h('div', { class: 'r' }, BTN(st.ai ? '🎨 생성 시작' : '📷 캡처', go, 'b'), BTN('프롬프트 보기', () => { const vk = [...st.views][0] || 'cur'; modal('프롬프트', h('div', {}, h('pre', { class: 'pre' }, renderPrompt(vk, st) + (st.guide ? '\n\nEXACT OPENINGS & OBJECTS:\n' + A.layoutText(vk, 1280, 720) : '')), st.guide ? h('div', {}, h('p', { class: 'mu sm' }, '함께 보내는 구조 가이드 이미지'), h('img', { src: A.captureGuide(vk, 640, 360), class: 'full' })) : null)); }, 'c')),
         res);
     };
     const go = async () => {
       const sz = SIZES.find(s => s[0] === st.size), W = st.size === 'custom' ? st.cw : sz[2], H = st.size === 'custom' ? st.ch : sz[3];
       if (!(W > 100 && H > 100)) return toast('크기를 확인하세요'); if (!st.views.size) return toast('각도를 하나 이상 선택하세요');
       const im = modelFor('image'); if (st.ai && !im.key) { toast('이미지 모델 키가 없습니다'); return openSettings(); }
-      const asp = nearestAspect(W / H), sc = Math.min(1, 1536 / Math.max(W, H));
+      const asp = nearestAspect(W / H), sc = Math.min(1, 1536 / Math.max(W, H)); A.askNotifyPerm && A.askNotifyPerm(); toast(`ℹ ${st.views.size}장 ${st.ai ? '실사 이미지 생성' : '캡처'}을 시작했습니다 — 끝나면 알려 드릴게요`, 3500);
       for (const vk of st.views) {
         const name = VIEWS.find(v => v[0] === vk)?.[1] || vk;
         const card = h('div', { class: 'rcard' }, h('div', { class: 'ph' }, h('span', { class: 'spin' }), h('small', {}, `${name} · 준비 중…`)));
@@ -391,9 +415,41 @@ ${sceneText(viewKey)}`;
         try {
           const cap = A.captureView(vk, Math.round(W * (st.ai ? sc : 1)), Math.round(H * (st.ai ? sc : 1)));
           let out = cap;
-          if (st.ai) { card.querySelector('small').textContent = `${name} · AI 생성 중… (20~90초)`; const rr = st.useRefs ? await collectRenderRefs(st.extraRefs.length ? 7 : 10) : { imgs: [], text: '' }; const xr = st.extraRefs.slice(0, 4), xt = xr.length ? ` Additional style reference images #${rr.imgs.length + 2}${xr.length > 1 ? '-#' + (rr.imgs.length + 1 + xr.length) : ''}: match their overall style, lighting and materials.` : ''; const gen = await aiImage({ ...im, prompt: renderPrompt(vk, st) + rr.text + xt, image: cap, refs: [...rr.imgs, ...xr], aspect: asp, quality: st.quality }); out = await coverResize(gen, W, H); }
+          if (st.ai) {
+            card.querySelector('small').textContent = `${name} · AI 생성 중… (20~90초)`;
+            const cw = Math.round(W * sc), ch = Math.round(H * sc), guide = st.guide ? A.captureGuide(vk, cw, ch) : null, lay = st.guide ? A.layoutText(vk, cw, ch) : '';
+            const start = guide ? 3 : 2, rr = st.useRefs ? await collectRenderRefs(st.extraRefs.length ? 6 : 9, start) : { imgs: [], text: '' }, xr = st.extraRefs.slice(0, 4), x0 = start + rr.imgs.length;
+            const xt = xr.length ? ` Additional style reference image${xr.length > 1 ? 's' : ''} #${x0}${xr.length > 1 ? '–#' + (x0 + xr.length - 1) : ''}: match their overall style, lighting and materials only (never their layout).` : '';
+            const gt = guide ? `\nSTRUCTURE GUIDE: image #2 is a flat-color map rendered from EXACTLY the same camera as image #1 (it is not a style reference): gray = walls/floor/ceiling, BLUE = window frames, light blue = window glass, ORANGE = door frames/panels, light orange = door glass, yellow = light fixtures, each furniture piece = its own flat color listed below. Use it only to lock geometry: every window, door, wall edge and object in your photo must cover the same pixel region as in the guide. Never enlarge, shrink or move a window; never move a door to a different wall; never mirror the scene; whatever is nearest to the camera in image #1 stays nearest.\nEXACT OPENINGS & OBJECTS FROM THE 3D MODEL:\n${lay}` : '';
+            const prompt = renderPrompt(vk, st) + gt + rr.text + xt;
+            card._prompt = prompt;
+            const people = A.items.filter(x => x.type === 'person'), small = card.querySelector('small');
+            const peopleRefs = new Set(); for (const x of people) for (const r of (x.refs || [])) { const src = await getRef(r.id); if (src) peopleRefs.add(src); }
+            // 안전 필터 오탐 대비: 1) 그대로 → 2) 사람 설명을 단순하게·사람 참고 사진 제외 → 3) 사람 없이 → 4) 다른 이미지 AI
+            const tries = [{ n: '기본', im, prompt, image: cap, refs: [...(guide ? [guide] : []), ...rr.imgs, ...xr] }];
+            const plainPrompt = prompt.replace(/\(([^()]*)\) (?=[^\n]*\[사람\])/g, '').replace(/People:[^\n]*/g, '') + `\nPeople in the scene are ordinary, generic, non-identifiable adults in everyday clothes (${people.map(x => personEN(x, true)).join('; ')}).`;
+            tries.push({ n: '사람 묘사 단순화', im, prompt: plainPrompt, image: cap, refs: [...(guide ? [guide] : []), ...rr.imgs.filter(x => !peopleRefs.has(x)), ...xr] });
+            if (people.length) tries.push({ n: '사람 제외', im, noPeople: true });
+            const other = ['gemini', 'openai'].filter(p => p !== im.provider).map(p => ({ provider: p, model: (PROVIDERS[p].image[0] || [])[0], key: keyOf(p) })).find(x => x.key && x.model);
+            if (other) tries.push({ n: (PROVIDERS[other.provider] || {}).name + '로 다시', im: other, prompt: plainPrompt, image: cap, refs: tries[1].refs });
+            let gen = null, lastErr = null, used = null;
+            for (const t of tries) {
+              try {
+                if (t.noPeople) { const hid = people.filter(x => x.g && x.g.visible); hid.forEach(x => { x.g.visible = false; }); try { t.image = A.captureView(vk, cw, ch); t.refs = guide ? [A.captureGuide(vk, cw, ch)] : []; } finally { hid.forEach(x => { x.g.visible = true; }); } t.prompt = renderPrompt(vk, st).replace(/, a (man|woman|child) about[^;]*/g, '') + (guide ? gt.replace(/- [^\n]*\[?사람[^\n]*\n?/g, '') : '') + '\nDo not add any people.'; }
+                if (t !== tries[0]) small.textContent = `${name} · 안전 필터 오탐으로 다시 시도 (${t.n})…`;
+                const t0 = Date.now();
+                try { gen = await aiImage({ ...t.im, prompt: t.prompt, image: t.image, refs: t.refs, aspect: asp, quality: st.quality }); }
+                catch (e) { if (!e.safety || Date.now() - t0 < 20000) throw e; small.textContent = `${name} · 결과 이미지 검사에서 거절 — 같은 내용으로 한 번 더 시도…`; gen = await aiImage({ ...t.im, prompt: t.prompt, image: t.image, refs: t.refs, aspect: asp, quality: st.quality }); }
+                used = t; break;
+              } catch (e) { lastErr = e; if (!e.safety) throw e; }
+            }
+            if (!gen) throw new Error('이미지 AI의 안전 필터가 계속 거절했습니다. 사람에게 붙인 참고 사진이나 얼굴 사진을 빼고 다시 시도해 보세요. (' + (lastErr && lastErr.message || '') + ')');
+            if (used !== tries[0]) toast(`ℹ 안전 필터 오탐을 피해 「${used.n}」 방식으로 생성했습니다`, 6000);
+            out = await coverResize(gen, W, H);
+          }
           showResult(card, out, cap, name, W, H);
-        } catch (e) { card.innerHTML = ''; card.append(h('p', { class: 'warn' }, `${name}: ${e.message}`)); }
+          toast(st.ai ? `🎨 실사 이미지 완성 — ${name} (${W}×${H})` : `📷 캡처 완료 — ${name}`, 6000, ['보기', () => { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); const im2 = card.querySelector('img'); if (im2) im2.click(); }], { type: 'ok', sys: true, title: '실사 이미지 완성' });
+        } catch (e) { card.innerHTML = ''; card.append(h('p', { class: 'warn' }, `${name}: ${e.message}`)); toast(`⚠ ${name} 생성 실패: ${e.message}`, 9000, null, { type: 'err', sys: true }); }
       }
     };
     const showResult = (card, url, cap, name, W, H) => {
@@ -490,11 +546,11 @@ JSON 하나만: {"set":{바꿀 값만 — ${PERSON_KEYS}},"face":{"img":얼굴 �
     } catch (e) { toast('⚠ ' + e.message, 7000); }
   }
   // 실사 렌더에 넣을 참고 사진 모으기 (사람 얼굴·옷 / 가구 느낌 / 공간 분위기)
-  async function collectRenderRefs(max = 10) {
-    const out = [], lines = [], add = async (r, who) => { if (out.length >= max) return; const src = await getRef(r.id); if (!src) return; out.push(src); lines.push(`Reference image #${out.length + 1} → ${who}: match its ${REF_EN[r.kind] || 'look'}${r.note ? ' (' + r.note + ')' : ''}.`); };
+  async function collectRenderRefs(max = 10, start = 2) {
+    const out = [], lines = [], add = async (r, who) => { if (out.length >= max) return; const src = await getRef(r.id); if (!src) return; out.push(src); lines.push(`Reference image #${start + out.length - 1} → ${who}: match its ${REF_EN[r.kind] || 'look'}${r.note ? ' (' + r.note + ')' : ''}.`); };
     for (const r of (A.R.refs || []).filter(r => r.use !== 0)) await add(r, 'the whole space');
     for (const it of A.items) { if (it.refUse === 0) continue; for (const r of (it.refs || []).slice(0, 3)) await add(r, `${A.itemLabel(it)} "${it.name}"${it.type === 'person' ? ` (the ${it.sex === 'f' ? 'woman' : it.sex === 'c' ? 'child' : 'man'} ${it.h}cm tall)` : ` (${A.TYPES[it.type] || it.type}, ${it.w}x${it.d}x${it.h}cm)`}`); }
-    return { imgs: out, text: lines.length ? `\nREFERENCE IMAGES: image #1 is the 3D layout to transform; the following images are references for specific objects. ${lines.join(' ')} Apply each reference ONLY to its object and only for the named aspect; keep positions, sizes and camera from image #1. People must remain fully and appropriately clothed as described.` : '' };
+    return { imgs: out, text: lines.length ? `\nREFERENCE IMAGES: image #1 is the 3D layout to transform; images from #${start} are references for specific objects. ${lines.join(' ')} Apply each reference ONLY to its object and only for the named aspect; keep positions, sizes and camera from image #1. This is an ordinary interior/architecture visualization; keep each person's everyday outfit exactly as described.` : '' };
   }
   return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace, openLink, copyCfgFile, analyzeRefs, collectRenderRefs };
 }
