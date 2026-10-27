@@ -85,6 +85,11 @@ actions 종류:
 - {"op":"add","item":{"preset":"카탈로그 이름(있으면)","name":"","type":"모델키","w":,"d":,"h":,"x":,"z":,"y":0,"rot":0,"color":"#hex","c2":"#hex","mat":"재질키","mat2":"","mt":"f|w|c","wall":"벽2(벽 부착일 때)","ws":벽왼쪽끝에서중심거리,"n":단수,"cpat":"열패턴","pv":"식물종류"}}
 - {"op":"update","target":"책장1" 또는 ["책장1","의자2"] 또는 "all","set":{변경할 필드만, "scale":1.2 배율, "dx":,"dz":, "drot":}}
 - {"op":"delete","target":...}
+- 여러 개 일괄: {"op":"group","target":["의자1","의자2","식탁1"]} (그룹 묶기) · {"op":"ungroup","target":[...]}
+- {"op":"align","target":[...],"how":"l|cx|r|b|cz|f|floor|roomC"} (왼쪽/가로가운데/오른쪽/뒤/세로가운데/앞 맞춤, 바닥으로, 묶음을 방 가운데로)
+- {"op":"distribute","target":[...],"axis":"x|z","gap":30} (gap 생략 시 균등 분배, 숫자면 그 간격 cm로 나란히)
+- {"op":"mirror","target":[...],"axis":"x|z"} · {"op":"rotateGroup","target":[...],"cw":90} (묶음 가운데 기준 시계방향 회전) · {"op":"moveGroup","target":[...],"dx":50,"dz":0} (간격 유지한 채 평행 이동)
+- {"op":"select","target":[...]} (사용자 화면에서 그 가구들을 선택 상태로)
 - {"op":"light","targets":["조명1","조명2"] 또는 "all"(전체 조명=천장·벽 조명과 스탠드 모두),"set":{"on":true/false,"lum":0~2.5(0=완전 어둡게, 1=기본),"temp":2700~6500}}
 - {"op":"addLight","light":{"kind":"down|spot|panel|round|pendant|pendantG|pendantL|chand|rail|fan|wall|strip","x":,"z":,"wall":"벽1","s":,"y":,"temp":,"lum":}} / {"op":"deleteLight","targets":[...]}
 - {"op":"room","set":{"W":,"D":,"H":,"shape":"${A.SHAPES.map(s => s[0]).join('|')}","fl":"${A.FLOORS.map(f => f[0]).join('|')}","flc":"#hex","fld":0|90|45,"wc":"#hex","wallColors":{"벽2":"#hex"},"bb":"#hex","view":"none|city|apt|nature|park|sea|snow","vtime":"auto|day|sunset|night"}}

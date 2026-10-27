@@ -115,7 +115,7 @@ const opLabel = o => (o.kind === 'win' ? '창문' : '문') + (o.no || '');
 const lightLabel = l => '조명' + (l.no || '');
 function numberAll() { items.forEach(i => ensureNo(i, items, x => grp(x.type))); OPS.forEach(o => ensureNo(o, OPS, x => x.kind)); LIGHTS.forEach(l => ensureNo(l, LIGHTS, () => 'l')); }
 const LOCKMSG = { item: '잠긴 가구입니다', op: '잠긴 창호입니다', light: '잠긴 조명입니다', room: '방 모양이 잠겨 있습니다' };
-const isLocked = s => !!(s && (s.k === 'edge' || s.k === 'vert' ? R.lock : s.o && s.o.lock));
+const isLocked = s => !!(s && (s.k === 'multi' ? s.list.every(o => o.lock) : s.k === 'edge' || s.k === 'vert' ? R.lock : s.o && s.o.lock));
 function lockGuard(s) { if (isLocked(s)) { toast('🔒 ' + (LOCKMSG[s.k] || LOCKMSG.room) + ' — 잠금을 풀면 수정할 수 있습니다'); return true; } return false; }
 const labelOf = s => !s ? '' : s.k === 'item' ? itemLabel(s.o) : s.k === 'op' ? opLabel(s.o) : s.k === 'light' ? lightLabel(s.o) : s.k === 'edge' ? '벽' + (s.i + 1) : '꼭짓점' + (s.i + 1);
 
@@ -569,11 +569,14 @@ function addResizeHandles(it) {
 }
 function updSelBox() {
   if (sel && (sel.k === 'op' || sel.k === 'light') && sel.o.g) { selBox.setFromObject(sel.o.g); selBox.visible = true; } else selBox.visible = false;
+  if (isMulti()) { const b = mBox.box.makeEmpty(); sel.list.forEach(o => o.g && b.expandByObject(o.g)); b.expandByScalar(2); mBox.visible = true; } else mBox.visible = false;
 }
 function setSel(s, tab) {
-  if (sel && sel.k === 'item' && sel.o.g) { sel.o.g.userData.e.visible = false; (sel.o.g.userData.hd || []).forEach(h => { sel.o.g.remove(h); h.geometry.dispose(); }); sel.o.g.userData.hd = null; }
+  selItems().forEach(o => { if (!o.g) return; if (o.g.userData.e) o.g.userData.e.visible = false; (o.g.userData.hd || []).forEach(h => { o.g.remove(h); h.geometry.dispose(); }); o.g.userData.hd = null; });
   sel = s;
   if (sel && sel.k === 'item' && sel.o.g) { sel.o.g.userData.e.visible = true; addResizeHandles(sel.o); }
+  if (isMulti()) sel.list.forEach(o => { if (o.g && o.g.userData.e) o.g.userData.e.visible = true; });
+  if (!sel && MMODE) setMMode(false);
   updSelBox(); renderSel(); quick(); dims(); markList();
   if (tab) { showTab(tab); if (isMobile() && sheetState === 'peek') setSheet('half'); }
 }
@@ -815,8 +818,9 @@ function delObj(s) {
   else if (s.k === 'light') { ltG.remove(o.g); disposeTree(o.g); LIGHTS = LIGHTS.filter(i => i !== o); renderLights(); }
   else if (s.k === 'vert') return deleteVertex(s.i);
 }
-function delSel() { if (!sel || lockGuard(sel)) return; delObj(sel); setSel(null); upd(); }
+function delSel() { if (isMulti()) return delMulti(sel.list); if (!sel || lockGuard(sel)) return; delObj(sel); setSel(null); upd(); }
 function dupSel() {
+  if (isMulti()) return dupMulti(sel.list);
   if (!sel || !sel.o) return; const o = sel.o;
   if (sel.k === 'item') { const it = newItem({ ...clean(o), id: undefined, no: undefined, lock: 0 }); it.id = nid++; it.x += 20; it.z += 20; ensureNo(it, [...items, it], x => grp(x.type)); items.push(it); mk(it); fit(it, false); if (overlapsAny(it)) freeSpot(it); setSel({ k: 'item', o: it }); }
   else if (sel.k === 'op') { const n = { ...clean(o), id: nid++, no: undefined, lock: 0 }; n.s = o.s + o.w + 10; ensureNo(n, [...OPS, n], x => x.kind); clampOp(n); OPS.push(n); buildRoom(); renderRoom(); setSel({ k: 'op', o: n }); }
@@ -824,7 +828,7 @@ function dupSel() {
   upd();
 }
 function rotSel(deg = 90) {
-  if (!sel) return;
+  if (!sel) return; if (isMulti()) return rotMulti(sel.list, deg, PREF.rotEach);
   if (sel.k === 'item') { const it = sel.o; if (it.lock) return toast('잠긴 가구입니다'); if (it.mt === 'w') return toast('벽 부착 가구는 벽 방향을 따릅니다'); it.rot = norm360((it.rot || 0) + deg); fit(it, false); upd(); }
   else if (sel.k === 'light' && !lightIsWall(sel.o)) { if (lockGuard(sel)) return; sel.o.rot = norm360((sel.o.rot || 0) + deg); placeLight(sel.o); upd(); }
 }
@@ -833,6 +837,7 @@ const cwOf = o => norm360(-(o.rot || 0));
 const rotCW = d => rotSel(-d);
 function rotTo(cw) {
   if (!sel) return; const o = sel.o;
+  if (isMulti()) { if (guardMulti(sel.list)) return; floorOf(sel.list).forEach(it => { it.rot = norm360(-cw); place(it); }); keepInside(sel.list); return upd(); }
   if (sel.k === 'item') { if (o.lock) return toast('잠긴 가구입니다'); if (o.mt === 'w') return; o.rot = norm360(-cw); fit(o, false); upd(); }
   else if (sel.k === 'light' && !lightIsWall(o)) { if (lockGuard(sel)) return; o.rot = norm360(-cw); placeLight(o); upd(); }
 }
@@ -849,6 +854,184 @@ function rotWidget(o, compact) {
     h('div', { class: 'rotq' + (compact ? ' c3' : '') }, compact ? null : q(-15, '⟲ 15°'), q(-45, '⟲ 45°'), q(-90, '⟲ 90°'), q(-180, '⟲ 180°'), compact ? null : q(15, '⟳ 15°'), q(45, '⟳ 45°'), q(90, '⟳ 90°', 'b'), q(180, '⟳ 180°')),
     h('div', { class: 'rotc' }, inp, h('span', { class: 'u' }, '°'), dir, BTN('적용', go, 'b'), BTN('0°', () => rotTo(0), 'o', '정면(0°)으로'), cur));
 }
+// ---------- 다중 선택 · 그룹 · 일괄 편집 ----------
+// sel = { k: 'multi', list: [가구…], o: 기준 가구 }  (가구·소품·사람)
+let MMODE = false, MARQ = false;
+const mBox = new THREE.Box3Helper(new THREE.Box3(), 0xe8590c); mBox.material.depthTest = false; mBox.renderOrder = 21; mBox.visible = false; scene.add(mBox);
+const isMulti = () => !!(sel && sel.k === 'multi');
+const selItems = () => !sel ? [] : sel.k === 'multi' ? sel.list : sel.k === 'item' ? [sel.o] : [];
+const groupOf = it => it && it.gid ? items.filter(o => o.gid === it.gid) : it ? [it] : [];
+const floorOf = list => list.filter(o => o.mt !== 'w');
+function selectItems(list, primary, tab) {
+  list = [...new Set(list)].filter(i => items.includes(i));
+  if (!list.length) return setSel(null, tab);
+  if (list.length === 1) return setSel({ k: 'item', o: list[0] }, tab);
+  setSel({ k: 'multi', list, o: list.includes(primary) ? primary : list[list.length - 1] }, tab);
+}
+function toggleItem(it) {
+  const cur = selItems(), mem = groupOf(it), all = mem.every(m => cur.includes(m));
+  selectItems(all ? cur.filter(c => !mem.includes(c)) : [...cur, ...mem], it);
+}
+function startMarq() { MARQ = true; document.body.classList.add('marq'); toast('▭ 화면에서 사각형을 그리듯 끌면 그 안의 가구가 선택됩니다', 4000); }
+function setMMode(v) { MMODE = !!v; document.body.classList.toggle('mmode', MMODE); quick(); if (MMODE) toast(isMobile() ? '☑ 다중 선택: 가구를 톡톡 눌러 추가/빼기 · 선택된 가구를 끌면 함께 이동' : '☑ 다중 선택: 클릭해서 추가/빼기 (Shift+클릭과 같음)', 4000); }
+function unionBox(list) { let b = null; list.forEach(it => { const a = aabb(it); b = b ? [Math.min(b[0], a[0]), Math.max(b[1], a[1]), Math.min(b[2], a[2]), Math.max(b[3], a[3])] : a; }); return b || [0, 0, 0, 0]; }
+const ucenter = list => { const u = unionBox(list); return [(u[0] + u[1]) / 2, (u[2] + u[3]) / 2]; };
+// 그룹 전체를 같이 밀어서 방 밖으로 나가지 않게 (서로 간격은 유지)
+function keepInside(list) {
+  const fl = floorOf(list); if (!fl.length) return; const u = unionBox(fl); let dx = 0, dz = 0;
+  if (u[1] - u[0] <= BB.W) { if (u[0] < BB.x0) dx = BB.x0 - u[0]; else if (u[1] > BB.x1) dx = BB.x1 - u[1]; }
+  if (u[3] - u[2] <= BB.D) { if (u[2] < BB.z0) dz = BB.z0 - u[2]; else if (u[3] > BB.z1) dz = BB.z1 - u[3]; }
+  fl.forEach(it => { it.x += dx; it.z += dz; it.y = clamp(it.y || 0, 0, Math.max(0, R.H - it.h)); place(it); });
+  list.filter(o => o.mt === 'w').forEach(o => fit(o, false));
+}
+const lockedIn = list => list.filter(o => o.lock);
+function guardMulti(list) { const lk = lockedIn(list); if (lk.length) { toast(`🔒 잠긴 가구 ${lk.length}개가 있어 할 수 없습니다 (${lk.slice(0, 3).map(itemLabel).join(', ')}${lk.length > 3 ? '…' : ''})`, 4000); return true; } return false; }
+function moveMulti(list, dx, dz) {
+  if (guardMulti(list)) return;
+  list.forEach(o => { if (o.mt === 'w') { const e = E[o.wall]; if (e) o.ws = (o.ws || 0) + dx * e.u[0] + dz * e.u[1]; fit(o, false); } else { o.x += dx; o.z += dz; place(o); } });
+  keepInside(list); upd();
+}
+function rotMulti(list, deg, each) {
+  if (guardMulti(list)) return; const fl = floorOf(list); if (!fl.length) return toast('벽 부착 가구는 벽 방향을 따릅니다');
+  const [cx, cz] = ucenter(fl), a = deg * PI / 180, c = Math.cos(a), s = Math.sin(a);
+  fl.forEach(o => { if (!each) { const x = o.x - cx, z = o.z - cz; o.x = cx + x * c + z * s; o.z = cz - x * s + z * c; } o.rot = norm360((o.rot || 0) + deg); place(o); });
+  keepInside(list); upd();
+}
+function scaleMulti(list, f, spread) {
+  if (guardMulti(list) || !(f > 0)) return; const [cx, cz] = ucenter(floorOf(list));
+  list.forEach(o => { scaleIt(o, f); mk(o); if (spread && o.mt !== 'w') { o.x = cx + (o.x - cx) * f; o.z = cz + (o.z - cz) * f; } fit(o, false); });
+  keepInside(list); upd();
+}
+function sizeMulti(list, vals) {
+  if (guardMulti(list)) return;
+  list.forEach(o => { ['w', 'd', 'h'].forEach(k => { const v = +vals[k]; if (v > 0) { if (vals.ratio) { const f = v / o[k]; scaleIt(o, f); } else o[k] = r1(v); } }); mk(o); fit(o, false); });
+  upd(); toast(`${list.length}개 크기를 바꿨습니다`);
+}
+function alignMulti(list, how) {
+  if (guardMulti(list)) return; const fl = floorOf(list); if (fl.length < 2 && !/^room/.test(how)) return toast('바닥 가구가 2개 이상이어야 합니다');
+  const u = unionBox(fl), ucx = (u[0] + u[1]) / 2, ucz = (u[2] + u[3]) / 2, [rcx, rcz] = center();
+  if (how === 'roomC') { fl.forEach(o => { o.x += rcx - ucx; o.z += rcz - ucz; place(o); }); return (keepInside(list), upd()); }
+  fl.forEach(o => {
+    const a = aabb(o);
+    if (how === 'l') o.x += u[0] - a[0]; else if (how === 'r') o.x += u[1] - a[1]; else if (how === 'cx') o.x += ucx - (a[0] + a[1]) / 2;
+    else if (how === 'b') o.z += u[2] - a[2]; else if (how === 'f') o.z += u[3] - a[3]; else if (how === 'cz') o.z += ucz - (a[2] + a[3]) / 2;
+    else if (how === 'floor') o.y = 0;
+    place(o);
+  });
+  keepInside(list); upd();
+}
+// axis 'x' | 'z' · gap: null = 양 끝 고정하고 간격 균등, 숫자 = 그 간격(cm)으로 나란히
+function distMulti(list, axis, gap) {
+  if (guardMulti(list)) return; const fl = floorOf(list); if (fl.length < (gap == null ? 3 : 2)) return toast(gap == null ? '균등 분배는 3개 이상 선택하세요' : '2개 이상 선택하세요');
+  const lo = axis === 'x' ? 0 : 2, hi = lo + 1, key = axis === 'x' ? 'x' : 'z';
+  const arr = fl.map(o => ({ o, a: aabb(o) })).sort((p, q) => (p.a[lo] + p.a[hi]) - (q.a[lo] + q.a[hi]));
+  const size = arr.reduce((s, p) => s + (p.a[hi] - p.a[lo]), 0), start = arr[0].a[lo], end = arr[arr.length - 1].a[hi];
+  const g = gap == null ? (end - start - size) / (arr.length - 1) : +gap;
+  let pos = start; arr.forEach(p => { const w = p.a[hi] - p.a[lo]; p.o[key] += pos - p.a[lo]; pos += w + g; place(p.o); });
+  keepInside(list); upd(); toast(`간격 ${rd(g)}cm로 ${axis === 'x' ? '가로' : '세로'} 정렬했습니다`);
+}
+function mirrorMulti(list, axis) {
+  if (guardMulti(list)) return; const fl = floorOf(list), [cx, cz] = ucenter(fl);
+  fl.forEach(o => { if (axis === 'x') { o.x = 2 * cx - o.x; o.rot = norm360(-(o.rot || 0)); } else { o.z = 2 * cz - o.z; o.rot = norm360(180 - (o.rot || 0)); } place(o); });
+  keepInside(list); upd();
+}
+let gidN = 0; const nextGid = () => { gidN = Math.max(gidN, ...items.map(i => i.gid || 0)) + 1; return gidN; };
+function groupSel() {
+  const list = selItems(); if (list.length < 2) return toast('2개 이상 선택한 뒤 그룹으로 묶으세요');
+  const g = nextGid(); list.forEach(o => { o.gid = g; }); selectItems(list, sel.o); upd(); renderSel(); toast(`⧉ ${list.length}개를 그룹${g}(으)로 묶었습니다 — 하나를 누르면 그룹 전체가 선택됩니다`, 4000);
+}
+function ungroupSel() { const list = selItems(), n = new Set(list.map(o => o.gid).filter(Boolean)).size; if (!n) return toast('그룹이 아닙니다'); list.forEach(o => { delete o.gid; }); upd(); renderSel(); toast('그룹을 풀었습니다 (선택은 유지)'); }
+const isOneGroup = list => list.length > 1 && list[0].gid && list.every(o => o.gid === list[0].gid) && groupOf(list[0]).length === list.length;
+function cloneItems(list, dx, dz) {
+  const map = new Map(), out = [];
+  list.forEach(o => {
+    const it = newItem({ ...clean(o), id: undefined, no: undefined, lock: 0 }); it.id = nid++;
+    if (o.gid) { if (!map.has(o.gid)) map.set(o.gid, nextGid()); it.gid = map.get(o.gid); }
+    if (o.mt === 'w') it.ws = (o.ws || 0) + dx; else { it.x = o.x + dx; it.z = o.z + dz; }
+    ensureNo(it, [...items, it], x => grp(x.type)); items.push(it); mk(it); out.push(it);
+  });
+  out.forEach(it => (it.mt === 'w' ? fit(it, false) : place(it))); keepInside(out); return out;
+}
+function dupMulti(list, n = 1, axis = null, gap = 20) {
+  const u = unionBox(floorOf(list).length ? floorOf(list) : list); let all = [];
+  for (let i = 1; i <= n; i++) {
+    const dx = axis === 'x' ? i * (u[1] - u[0] + gap) : axis === 'z' ? 0 : 30 * i, dz = axis === 'z' ? i * (u[3] - u[2] + gap) : axis === 'x' ? 0 : 30 * i;
+    all = all.concat(cloneItems(list, dx, dz));
+  }
+  selectItems(all, all[all.length - 1]); upd(); toast(`${all.length}개를 복제했습니다`);
+}
+function delMulti(list) {
+  const ok = list.filter(o => !o.lock); ok.forEach(o => delObj({ k: 'item', o }));
+  setSel(null); upd(); toast(`🗑 ${ok.length}개 삭제` + (ok.length < list.length ? ` · 잠긴 ${list.length - ok.length}개는 남김` : '') + ' (Ctrl+Z 되돌리기)');
+}
+function lockMulti(list) { const v = list.some(o => !o.lock) ? 1 : 0; list.forEach(o => { o.lock = v; }); selectItems(list, sel && sel.o); markList(); commitSoon(0); toast(v ? `🔒 ${list.length}개 잠금` : `🔓 ${list.length}개 잠금 해제`); }
+function batchSet(list, k, v) { list.forEach(o => { if (o.lock && k !== 'lock') return; o[k] = v; mk(o); fit(o, false); }); upd(); }
+const sameType = it => items.filter(o => o.type === it.type);
+// 화면 영역(사각형) 선택
+const marqEl = (() => { const d = document.createElement('div'); d.id = 'marq'; d.hidden = true; document.getElementById('v').append(d); return d; })();
+function marqRect(d, x, y) { const r = cv.getBoundingClientRect(), x0 = Math.min(d.x0, x), y0 = Math.min(d.y0, y), x1 = Math.max(d.x0, x), y1 = Math.max(d.y0, y); Object.assign(marqEl.style, { left: x0 - r.left + 'px', top: y0 - r.top + 'px', width: x1 - x0 + 'px', height: y1 - y0 + 'px' }); return [x0, y0, x1, y1]; }
+function marqPick(rc) {
+  const r = cv.getBoundingClientRect(), v = new THREE.Vector3();
+  return items.filter(it => { v.set(it.x, (it.y || 0) + it.h / 2, it.z).project(cam); if (v.z > 1) return false; const sx = r.left + (v.x + 1) / 2 * r.width, sy = r.top + (1 - v.y) / 2 * r.height; return sx >= rc[0] && sx <= rc[2] && sy >= rc[1] && sy <= rc[3]; });
+}
+// 다중 선택 패널
+function multiPanel(b) {
+  const list = sel.list, fl = floorOf(list), u = unionBox(fl.length ? fl : list), one = isOneGroup(list), lk = lockedIn(list).length;
+  const chips = h('div', { class: 'ch mchips' }, list.map(o => h('button', { class: 'c' + (o === sel.o ? ' on' : ''), type: 'button', title: '빼기', onclick: () => selectItems(list.filter(x => x !== o), sel.o) }, `${itemLabel(o)} ${o.name} ✕`)));
+  const step = h('select', { class: 'mstep', title: '한 번에 움직일 거리 (cm)' }, [1, 5, 10, 30, 50, 100].map(v => h('option', { value: v }, String(v)))); step.value = LS.get('r3d_mstep', 10); step.onchange = () => LS.set('r3d_mstep', +step.value);
+  const mv = (sx, sz) => moveMulti(list, sx * +step.value, sz * +step.value);
+  const dX = h('input', { type: 'number', inputmode: 'decimal', placeholder: '0' }), dZ = h('input', { type: 'number', inputmode: 'decimal', placeholder: '0' });
+  const pct = h('input', { type: 'number', inputmode: 'decimal', value: 100, min: 1, step: 5 });
+  const sw = h('input', { type: 'number', inputmode: 'decimal', placeholder: '그대로' }), sd = h('input', { type: 'number', inputmode: 'decimal', placeholder: '그대로' }), sh = h('input', { type: 'number', inputmode: 'decimal', placeholder: '그대로' });
+  const gap = h('input', { type: 'number', inputmode: 'decimal', value: LS.get('r3d_mgap', 20), min: 0 }); gap.onchange = () => LS.set('r3d_mgap', +gap.value || 0);
+  const an = h('input', { type: 'number', inputmode: 'numeric', value: 2, min: 1, max: 30 }), ag = h('input', { type: 'number', inputmode: 'decimal', value: 20, min: 0 }), ax = h('select', {}, h('option', { value: 'x' }, '가로(→)'), h('option', { value: 'z' }, '세로(↓)'));
+  const col = h('input', { type: 'color', value: sel.o.color || '#888888' }); col.oninput = () => batchSet(list, 'color', col.value);
+  const mat = h('select', {}, h('option', { value: '' }, '재질 일괄 변경…'), Object.keys(MATS).map(k => h('option', { value: k }, MATN[k] || k))); mat.onchange = () => { if (mat.value) batchSet(list, 'mat', mat.value); mat.value = ''; };
+  app(b,
+    h('div', { class: 'lab' }, one ? `⧉ 그룹${list[0].gid} · ${list.length}개` : `☑ ${list.length}개 선택`),
+    h('p', { class: 'mu sm' }, `전체 범위 ${rd(u[1] - u[0])} × ${rd(u[3] - u[2])} cm · 기준: ${itemLabel(sel.o)} ${sel.o.name}` + (lk ? ` · 🔒 잠긴 가구 ${lk}개` : '')),
+    chips,
+    h('div', { class: 'r keep' },
+      one ? BTN('⧉ 그룹 해제', ungroupSel, 'o') : BTN('⧉ 그룹으로 묶기 (Ctrl+G)', groupSel, 'b'),
+      BTN(lk === list.length ? '🔓 모두 잠금 해제' : '🔒 모두 잠금', () => lockMulti(list)),
+      BTN('선택 해제', () => setSel(null), 'c')),
+    h('h4', {}, '이동 (모두 평행하게) · 가운데 숫자 = 한 칸 cm'),
+    h('div', { class: 'mpad' },
+      h('div', { class: 'pad' }, h('span'), BTN('↑', () => mv(0, -1), 'c', '뒤로'), h('span'), BTN('←', () => mv(-1, 0), 'c', '왼쪽'), step, BTN('→', () => mv(1, 0), 'c', '오른쪽'), h('span'), BTN('↓', () => mv(0, 1), 'c', '앞으로'), h('span')),
+      h('div', { class: 'mvin' }, G(2, F('가로 이동 (→ +)', dX), F('세로 이동 (앞 +)', dZ)), h('div', { class: 'r' }, BTN('이동 적용', () => { const x = parseFloat(dX.value) || 0, z = parseFloat(dZ.value) || 0; if (!x && !z) return toast('이동할 거리를 입력하세요'); moveMulti(list, x, z); dX.value = dZ.value = ''; }, 'b'), BTN('방 가운데로', () => alignMulti(list, 'roomC'), 'o')))),
+    h('p', { class: 'mu sm' }, isMobile() ? '3D 화면에서 선택된 가구 하나를 끌면 모두 함께 움직입니다.' : '3D 화면에서 선택된 가구 하나를 끌면 모두 함께 움직입니다 · 방향키 5cm (Shift 20cm, Alt 1cm)'),
+    h('h4', {}, '회전'),
+    h('div', { class: 'cg' }, bchk('각자 제자리에서 회전 (끄면 묶음 전체가 가운데를 중심으로 회전)', () => PREF.rotEach, v => { PREF.rotEach = v ? 1 : 0; savePref(); })),
+    rotWidget(sel.o),
+    h('h4', {}, '크기 (일괄)'),
+    h('div', { class: 'r' }, ...[80, 90, 95, 105, 110, 120].map(p => BTN(p + '%', () => scaleMulti(list, p / 100, PREF.mSpread), 'c')),
+      h('span', { class: 'mpct' }, pct, '%'), BTN('적용', () => { const v = parseFloat(pct.value); if (v > 0) scaleMulti(list, v / 100, PREF.mSpread); pct.value = 100; }, 'b')),
+    h('div', { class: 'cg' }, bchk('간격도 같은 비율로 (묶음 전체를 키우기·줄이기)', () => PREF.mSpread, v => { PREF.mSpread = v ? 1 : 0; savePref(); })),
+    G(3, F('가로 일괄 (cm)', sw), F('세로(깊이)', sd), F('높이', sh)),
+    h('div', { class: 'r' }, BTN('모두 이 크기로', () => { if (!sw.value && !sd.value && !sh.value) return toast('바꿀 치수를 입력하세요'); sizeMulti(list, { w: sw.value, d: sd.value, h: sh.value, ratio: PREF.lock }); }, 'b'),
+      BTN(`기준(${itemLabel(sel.o)}) 크기로 맞추기`, () => sizeMulti(list, { w: sel.o.w, d: sel.o.d, h: sel.o.h }), 'o')),
+    h('p', { class: 'mu sm' }, PREF.lock ? '※ 「가로·세로·높이 비율 유지」가 켜져 있어 입력한 치수에 맞춰 각자 비율대로 커집니다.' : '※ 입력한 치수만 바뀌고 나머지는 그대로입니다.'),
+    h('h4', {}, '정렬'),
+    h('div', { class: 'mal' },
+      BTN('⇤ 왼쪽', () => alignMulti(list, 'l'), 'c'), BTN('↔ 가로 가운데', () => alignMulti(list, 'cx'), 'c'), BTN('오른쪽 ⇥', () => alignMulti(list, 'r'), 'c'),
+      BTN('⤒ 뒤쪽', () => alignMulti(list, 'b'), 'c'), BTN('↕ 세로 가운데', () => alignMulti(list, 'cz'), 'c'), BTN('앞쪽 ⤓', () => alignMulti(list, 'f'), 'c')),
+    h('div', { class: 'r' }, BTN('바닥에 내리기 (높이 0)', () => alignMulti(list, 'floor'), 'c')),
+    h('h4', {}, '간격 · 분배'),
+    h('div', { class: 'r' }, BTN('가로 균등 분배', () => distMulti(list, 'x', null), 'c'), BTN('세로 균등 분배', () => distMulti(list, 'z', null), 'c')),
+    h('div', { class: 'r mgap' }, h('span', { class: 'sm' }, '간격'), gap, h('span', { class: 'sm' }, 'cm로'), BTN('가로로 나란히', () => distMulti(list, 'x', +gap.value || 0), 'o'), BTN('세로로 나란히', () => distMulti(list, 'z', +gap.value || 0), 'o')),
+    h('h4', {}, '반전'),
+    h('div', { class: 'r' }, BTN('⇋ 좌우 반전', () => mirrorMulti(list, 'x'), 'c'), BTN('⇅ 앞뒤 반전', () => mirrorMulti(list, 'z'), 'c')),
+    h('p', { class: 'mu sm' }, '배치(위치·방향)를 거울처럼 뒤집습니다. 가구 모양 자체는 그대로입니다.'),
+    h('h4', {}, '복제'),
+    h('div', { class: 'r' }, BTN('복제 (Ctrl+D)', () => dupMulti(list), 'b')),
+    h('div', { class: 'r mgap' }, h('span', { class: 'sm' }, '배열 복제'), an, h('span', { class: 'sm' }, '세트 ·'), ax, h('span', { class: 'sm' }, '간격'), ag, h('span', { class: 'sm' }, 'cm'), BTN('만들기', () => dupMulti(list, clamp(+an.value || 1, 1, 30), ax.value, +ag.value || 0), 'o')),
+    h('h4', {}, '색·재질 일괄'),
+    h('div', { class: 'r' }, h('label', { class: 'mcol' }, '주 색상 ', col), mat),
+    h('h4', {}, '삭제'),
+    h('div', { class: 'r' }, BTN(`${list.length}개 모두 삭제`, () => delMulti(list), 'o danger')),
+  );
+  if (lk === list.length) b.querySelectorAll('.mpad button,.mal button').forEach(x => { x.disabled = true; });
+}
 function setSize(it, k, v) {
   v = Math.max(1, v);
   if (PREF.lock) { const f = v / it[k]; if (!isFinite(f) || f <= 0) return; ['w', 'd', 'h'].forEach(q => { it[q] = r1(Math.max(1, it[q] * f)); }); }
@@ -859,14 +1042,16 @@ const pctAll = it => Math.cbrt((it.w / it.bw) * (it.d / it.bd) * (it.h / it.bh))
 function remember(it) { if (!PREF.remember || !it.pk) return; SZ[it.pk] = { w: it.w, d: it.d, h: it.h }; LS.set(K_SZ, SZ); renderCatalog(); cloudSettingsSoon(); }
 function sizeChanged(it) { refreshItem(it, false); commitSoon(); clearTimeout(it._rt); it._rt = setTimeout(() => remember(it), 600); }
 function focusSel() {
+  if (isMulti()) { const b = new THREE.Box3(); sel.list.forEach(o => o.g && b.expandByObject(o.g)); const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3()).length(), dir = cam.position.clone().sub(ctl.target).normalize(); ctl.target.copy(c); cam.position.copy(c.clone().add(dir.multiplyScalar(Math.max(150, sz * 1.4)))); ctl.update(); return; }
   if (!sel || !sel.o || !sel.o.g) return; const o = sel.o, box = new THREE.Box3().setFromObject(o.g), c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()).length();
   if (cam === camO) { ctl.target.copy(c); camO.position.set(c.x, 3000, c.z + 0.01); camO.zoom = clamp(400 / Math.max(60, sz), 0.5, 8); camO.updateProjectionMatrix(); ctl.update(); return; }
   const dir = camP.position.clone().sub(ctl.target).normalize(); ctl.target.copy(c); camP.position.copy(c).add(dir.multiplyScalar(Math.max(140, sz * 2.2))); ctl.update();
 }
 let clip = null;
-function copySel() { if (sel && sel.o) { clip = { k: sel.k, o: clean(sel.o) }; toast('복사했습니다 (Ctrl+V 붙여넣기)'); } }
+function copySel() { if (isMulti()) { clip = { k: 'multi', list: sel.list.map(clean) }; return toast(`${sel.list.length}개 복사 (Ctrl+V 붙여넣기)`); } if (sel && sel.o) { clip = { k: sel.k, o: clean(sel.o) }; toast('복사했습니다 (Ctrl+V 붙여넣기)'); } }
 function pasteClip() {
   if (!clip) return;
+  if (clip.k === 'multi') { const tmp = clip.list.map(o => normItem(JSON.parse(JSON.stringify(o)))); const out = cloneItems(tmp, 15, 15); selectItems(out, out[out.length - 1]); return upd(); }
   if (clip.k === 'item') { const it = normItem({ ...JSON.parse(JSON.stringify(clip.o)), id: nid++, no: undefined }); it.x += 15; it.z += 15; ensureNo(it, [...items, it], x => grp(x.type)); items.push(it); mk(it); fit(it, false); setSel({ k: 'item', o: it }); }
   else if (clip.k === 'op') { const n = { ...clip.o, id: nid++, no: undefined }; n.s += n.w + 10; ensureNo(n, [...OPS, n], x => x.kind); clampOp(n); OPS.push(n); buildRoom(); renderRoom(); setSel({ k: 'op', o: n }); }
   else if (clip.k === 'light') { const n = { ...clip.o, id: nid++, no: undefined }; n.x = (n.x || 0) + 30; ensureNo(n, [...LIGHTS, n], () => 'l'); LIGHTS.push(n); mkLight(n); renderLights(); setSel({ k: 'light', o: n }); }
@@ -939,8 +1124,10 @@ cv.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   ptr(e); down = { x: e.clientX, y: e.clientY, t: Date.now(), touch: e.pointerType === 'touch' };
   if (mode === 'measure') return;
-  const h = pick(); if (!h) return; const f = classify(h); if (!f) return;
   const startDrag = d => { drag = d; ctl.enabled = false; try { cv.setPointerCapture(e.pointerId); } catch (_) { } };
+  const h = pick();
+  if (!h || (MARQ && !(classify(h) || {}).k)) { if ((e.shiftKey && e.pointerType === 'mouse') || MARQ) { startDrag({ k: 'marq', x0: e.clientX, y0: e.clientY, add: e.shiftKey || MMODE || isMulti() }); marqEl.hidden = false; marqRect(drag, e.clientX, e.clientY); } return; }
+  const f = classify(h); if (!f) return;
   if (f.k === 'rh') { const it = f.it; startDrag({ k: 'rh', it, ax: f.ax, w0: it.w, d0: it.d, h0: it.h, x0: it.x, z0: it.z }); return; }
   if (f.k === 'room') {
     const hd = f.h, p = hitY(0);
@@ -951,7 +1138,12 @@ cv.addEventListener('pointerdown', e => {
     startDrag({ k: 'edge', i: hd.i, p0: [p.x, p.z], a0: [...R.pts[hd.i]], b0: [...R.pts[(hd.i + 1) % R.pts.length]], n: e2.n, refs: wallRefs() }); return;
   }
   if (f.k === 'item') {
-    const it = f.o, was = sel && sel.o === it;
+    const it = f.o, cur = selItems(), inSel = cur.includes(it), add = e.shiftKey || e.ctrlKey || e.metaKey || MMODE;
+    const startMulti = (list, flag) => { const p = hitY(h.point.y); if (!p) return; if (lockedIn(list).length) { drag = null; down.mflag = flag; down.mit = it; return; } startDrag({ k: 'multi', list, it, flag, py: h.point.y, p0: [p.x, p.z], st: list.map(o => ({ o, x: o.x, z: o.z, ws: o.ws })) }); };
+    if (add) { if (!inSel) { down.handled = true; toggleItem(it); haptic(); return; } startMulti(selItems(), 'toggle'); return; }
+    if (inSel && cur.length > 1) { startMulti(cur, 'single'); return; }
+    if (it.gid && !e.altKey && groupOf(it).length > 1) { const g = groupOf(it); selectItems(g, it); if (down.touch && PREF.touchSafe) return; startMulti(g, null); return; }
+    const was = sel && sel.o === it;
     if (!was) setSel({ k: 'item', o: it });
     if (down.touch) { clearTimeout(lpT); lpT = setTimeout(() => { if (down && !down.moved) { haptic(25); setSel({ k: 'item', o: it }, 'sel'); } }, 480); }
     if (it.lock || (down.touch && PREF.touchSafe && !was)) return;
@@ -967,6 +1159,16 @@ cv.addEventListener('pointermove', e => {
   if (mode === 'measure' && mzTemp && mzTemp.p0) { const p = hitY(0); if (p) { mzTemp.p1 = [snapV(p.x, 1), snapV(p.z, 1)]; dims(); } return; }
   if (!drag) { if (e.pointerType === 'mouse' && !raf) raf = requestAnimationFrame(() => { raf = 0; const h = pick(), f = h && classify(h); cv.style.cursor = mode === 'measure' ? 'crosshair' : f ? (f.k === 'room' ? (f.h.t === 'edge' ? 'move' : 'pointer') : f.k === 'rh' ? 'nwse-resize' : 'grab') : 'default'; }); return; }
   const d = drag;
+  if (d.k === 'marq') { marqRect(d, e.clientX, e.clientY); return; }
+  if (d.k === 'multi') {
+    const p = hitY(d.py); if (!p) return; let dx = p.x - d.p0[0], dz = p.z - d.p0[1];
+    if (PREF.snap && !e.altKey) { dx = Math.round(dx / 5) * 5; dz = Math.round(dz / 5) * 5; }
+    const fl = d.st.filter(q => q.o.mt !== 'w');
+    if (fl.length) { let u = null; fl.forEach(q => { const [fw, fd] = fp(q.o), a = [q.x - fw / 2, q.x + fw / 2, q.z - fd / 2, q.z + fd / 2]; u = u ? [Math.min(u[0], a[0]), Math.max(u[1], a[1]), Math.min(u[2], a[2]), Math.max(u[3], a[3])] : a; });
+      if (u[1] - u[0] <= BB.W) dx = clamp(dx, BB.x0 - u[0], BB.x1 - u[1]); if (u[3] - u[2] <= BB.D) dz = clamp(dz, BB.z0 - u[2], BB.z1 - u[3]); }
+    d.st.forEach(q => { const o = q.o; if (o.mt === 'w') { const ew = E[o.wall]; if (ew) o.ws = (q.ws || 0) + dx * ew.u[0] + dz * ew.u[1]; fit(o, false); } else { o.x = q.x + dx; o.z = q.z + dz; place(o); } });
+    d.moved = true; check(); dims(); quick(); infoSel(); updSelBox(); return;
+  }
   if (d.k === 'item') {
     const it = d.it, p = hitY(d.py); if (!p) return;
     if (it.mt === 'w') { const ne = nearestEdge(p.x, p.z); if (ne) { it.wall = ne.e.i; it.ws = ne.s; } fit(it, true); }
@@ -1024,16 +1226,25 @@ function endDrag(e) {
   if (mode === 'measure' && wasClick) {
     ptr(e); const p = hitY(0);
     if (p) { const q = [snapV(p.x, 1), snapV(p.z, 1)]; if (!mzTemp || !mzTemp.p0) mzTemp = { p0: q }; else { MEAS.push([...mzTemp.p0, ...q]); mzTemp = null; upd(); const m = MEAS.at(-1); toast(`측정: ${rd(Math.hypot(m[2] - m[0], m[3] - m[1]))}cm`); } dims(); }
+  } else if (drag && drag.k === 'marq') {
+    const d = drag; drag = null; ctl.enabled = true; marqEl.hidden = true; MARQ = false; document.body.classList.remove('marq');
+    const rc = [Math.min(d.x0, e.clientX), Math.min(d.y0, e.clientY), Math.max(d.x0, e.clientX), Math.max(d.y0, e.clientY)];
+    if (rc[2] - rc[0] > 6 || rc[3] - rc[1] > 6) { let found = marqPick(rc); found = [...new Set(found.flatMap(groupOf))]; const base = d.add ? selItems() : []; if (found.length || base.length) selectItems([...base, ...found], found[found.length - 1], isMobile() ? null : 'sel'); toast(found.length ? `▭ ${found.length}개를 선택했습니다` : '영역 안에 가구가 없습니다'); }
+  } else if (drag && drag.k === 'multi') {
+    const d = drag; drag = null; ctl.enabled = true;
+    if (wasClick && !d.moved) { if (d.flag === 'toggle') toggleItem(d.it); else if (d.flag === 'single') setSel({ k: 'item', o: d.it }); }
+    else { keepInside(d.list); upd(); renderSel(); }
   } else if (drag) {
     const d = drag; drag = null; ctl.enabled = true;
     if (d.k === 'rh') remember(d.it);
     if (d.k === 'edge' || d.k === 'vert') { cancelAnimationFrame(rrq); rrq = 0; R.pts = orient(R.pts); normalizeRoom(); reproject(d.refs); roomEdited(); renderRoom(); if (d.k === 'edge' && wasClick) setSel({ k: 'edge', i: d.i }, 'sel'); }
     if (d.k === 'op') renderRoom();
     upd(); renderSel();
-  } else if (wasClick && down && !down.handled) { ptr(e); if (!pick()) setSel(null); }
+  } else if (wasClick && down && down.mflag) { if (down.mflag === 'toggle') toggleItem(down.mit); else if (down.mflag === 'single') setSel({ k: 'item', o: down.mit }); }
+  else if (wasClick && down && !down.handled) { ptr(e); if (!pick() && !MMODE) setSel(null); }
   down = null;
 }
-cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', () => { drag = null; ctl.enabled = true; down = null; clearTimeout(lpT); });
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', () => { drag = null; ctl.enabled = true; down = null; clearTimeout(lpT); marqEl.hidden = true; });
 cv.addEventListener('dblclick', () => focusSel());
 cv.addEventListener('contextmenu', e => { if (isMobile()) e.preventDefault(); });
 
@@ -1046,7 +1257,9 @@ addEventListener('keydown', e => {
   if (ctrl && (k === 'd' || k === 'D')) { e.preventDefault(); return dupSel(); }
   if (ctrl && (k === 'c' || k === 'C')) return copySel();
   if (ctrl && (k === 'v' || k === 'V')) return pasteClip();
-  if (k === 'Escape') { if (mode) setMode(null); else setSel(null); closeMenus(); document.activeElement.blur && document.activeElement.blur(); return; }
+  if (ctrl && (k === 'a' || k === 'A')) { e.preventDefault(); if (items.length) selectItems(items, items[items.length - 1], 'sel'); return toast(`전체 ${items.length}개 선택`); }
+  if (ctrl && (k === 'g' || k === 'G')) { e.preventDefault(); if (e.shiftKey) return ungroupSel(); return isMulti() && isOneGroup(sel.list) ? ungroupSel() : groupSel(); }
+  if (k === 'Escape') { if (mode) setMode(null); else { setMMode(false); setSel(null); } closeMenus(); document.activeElement.blur && document.activeElement.blur(); return; }
   if (!sel) return;
   if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); return delSel(); }
   if (k === 'r' || k === 'R') return rotCW(e.shiftKey ? -90 : 90);
@@ -1056,6 +1269,11 @@ addEventListener('keydown', e => {
   const st = e.altKey ? 1 : e.shiftKey ? 20 : 5;
   let dx = 0, dz = 0;
   if (k === 'ArrowLeft') dx = -st; else if (k === 'ArrowRight') dx = st; else if (k === 'ArrowUp') dz = -st; else if (k === 'ArrowDown') dz = st;
+  if (isMulti()) {
+    if (k === '[' || k === ']') return scaleMulti(sel.list, k === ']' ? 1.05 : 1 / 1.05, PREF.mSpread);
+    if (dx || dz) { e.preventDefault(); return moveMulti(sel.list, dx, dz); }
+    return;
+  }
   if (sel.k === 'item') {
     const it = sel.o;
     if (k === '[' || k === ']') { if (it.lock) return; scaleIt(it, k === ']' ? 1.05 : 1 / 1.05); sizeChanged(it); return; }
@@ -1217,6 +1435,7 @@ $('addc').onclick = () => { const it = newItem({ name: '새 가구', w: 60, d: 6
 // 선택 패널
 function infoSel() {
   const el = $('inf'); if (!el) return; if (!sel) { el.textContent = ''; return; }
+  if (isMulti()) { const fl = floorOf(sel.list), u = unionBox(fl.length ? fl : sel.list), w = sel.list.filter(i => i.ov || i.wb || i.db || i.out).length; el.innerHTML = `<b>${sel.list.length}개 묶음</b> · ${rd(u[1] - u[0])}×${rd(u[3] - u[2])}cm · 왼쪽 <b>${rd(u[0] - BB.x0)}</b> · 오른쪽 <b>${rd(BB.x1 - u[1])}</b> · 뒤 <b>${rd(u[2] - BB.z0)}</b> · 앞 <b>${rd(BB.z1 - u[3])}</b> cm` + (w ? `<div class="warn">⚠ 확인 필요 ${w}개 (겹침·창문·문·방 밖)</div>` : ''); return; }
   if (sel.k === 'item') {
     const it = sel.o, b = aabb(it), w = [];
     if (it.ov) w.push('⚠ 다른 가구와 겹침'); if (it.wb) w.push('⚠ 창문을 가림'); if (it.db) w.push('⚠ 문 열림·통행 간섭'); if (it.out) w.push('⚠ 방 밖으로 나감');
@@ -1227,11 +1446,12 @@ function infoSel() {
 function renderSel() {
   const b = $('t-sel'); b.innerHTML = '';
   if (!sel) { app(b, h('p', { class: 'mu' }, '3D 화면이나 목록에서 가구·창호·조명·벽을 선택하세요.'), h('p', { class: 'mu sm' }, isMobile() ? '터치: 한 번 눌러 선택 → 다시 끌어서 이동 · 길게 누르면 상세 편집' : '더블클릭: 선택 대상으로 카메라 이동')); syncSel(); return; }
+  if (isMulti()) { multiPanel(b); app(b, h('div', { id: 'inf', class: 'inf' })); infoSel(); syncSel(); return; }
   if (sel.k === 'item') itemPanel(b, sel.o); else if (sel.k === 'op') opPanel(b, sel.o); else if (sel.k === 'light') lightPanel(b, sel.o); else if (sel.k === 'edge') edgePanel(b, sel.i); else vertPanel(b, sel.i);
   if (isLocked(sel)) { b.querySelectorAll('input,select,textarea,button').forEach(el => { if (!el.closest('.keep')) el.disabled = true; }); b.prepend(h('div', { class: 'lockbar' }, '🔒 잠금 상태 — 위치·크기·모양을 바꿀 수 없습니다', BTN('잠금 해제', () => setLock(sel, 0), 'c'))); }
   app(b, h('div', { id: 'inf', class: 'inf' })); infoSel(); syncSel();
 }
-function setLock(s, v) { if (!s) return; if (s.k === 'edge' || s.k === 'vert') { R.lock = v ? 1 : 0; buildHandles(); renderRoom(); } else s.o.lock = v ? 1 : 0; if (s.k === 'item') setSel(s); else { renderSel(); quick(); } renderRoom(); renderLights(); markList(); commitSoon(0); toast(v ? '🔒 잠갔습니다' : '🔓 잠금을 풀었습니다'); }
+function setLock(s, v) { if (!s) return; if (s.k === 'multi') { s.list.forEach(o => { o.lock = v ? 1 : 0; }); selectItems(s.list, s.o); markList(); commitSoon(0); return toast(v ? `🔒 ${s.list.length}개 잠금` : `🔓 ${s.list.length}개 잠금 해제`); } if (s.k === 'edge' || s.k === 'vert') { R.lock = v ? 1 : 0; buildHandles(); renderRoom(); } else s.o.lock = v ? 1 : 0; if (s.k === 'item') setSel(s); else { renderSel(); quick(); } renderRoom(); renderLights(); markList(); commitSoon(0); toast(v ? '🔒 잠갔습니다' : '🔓 잠금을 풀었습니다'); }
 function colEditor(it) {
   if (!COLSTY[it.type]) return null;
   const pat = () => colPat(it, fpw(it)), opts = COLSTY[it.type];
@@ -1265,6 +1485,7 @@ function itemPanel(b, it) {
       u ? BTN('내 크기로', () => { it.w = u.w; it.d = u.d; it.h = u.h; refreshItem(it, false); commitSoon(); }, 'o') : null,
       it.pk ? BTN('이 크기를 내 기본으로 저장', () => { SZ[it.pk] = { w: it.w, d: it.d, h: it.h }; LS.set(K_SZ, SZ); renderCatalog(); renderSel(); cloudSettingsSoon(); toast('다음에 추가할 때 이 크기로 들어갑니다'); }, 'o') : null,
       it.pk ? BTN('같은 종류 모두 이 크기로', () => { let n = 0; items.forEach(o => { if (o !== it && o.pk === it.pk) { o.w = it.w; o.d = it.d; o.h = it.h; mk(o); fit(o, false); n++; } }); upd(); toast(`${n}개 가구에 적용했습니다`); }, 'o') : null),
+    h('div', { class: 'r msr' }, BTN(`같은 종류 모두 선택 (${sameType(it).length})`, () => selectItems(sameType(it), it, 'sel'), 'c'), it.gid ? BTN(`⧉ 그룹${it.gid} 전체 선택`, () => selectItems(groupOf(it), it, 'sel'), 'c') : null, it.gid ? BTN('그룹에서 빼기', () => { delete it.gid; upd(); renderSel(); toast('그룹에서 뺐습니다'); }, 'c') : null, BTN('☑ 다른 가구도 함께 선택', () => setMMode(true), 'c')),
     h('h4', {}, '위치·회전'),
     it.mt === 'w' ? G(3, F('설치 벽', bsel(E.filter(straight).map(e => [e.i, '벽' + (e.i + 1)]), () => it.wall, v => { it.wall = +v; fit(it, false); upd(); })), F('벽 왼쪽 끝에서', bnum(() => (it.ws || 0) - fpw(it) / 2, v => { it.ws = v + fpw(it) / 2; fit(it, false); upd(); })), F('바닥에서 높이', bnum(() => it.y || 0, v => { it.y = v; fit(it, false); upd(); }, { min: 0 })))
       : G(4, F('왼쪽에서', bnum(() => it.x - fp(it)[0] / 2 - BB.x0, v => { it.x = BB.x0 + v + fp(it)[0] / 2; fit(it, false); upd(); })), F('뒤에서', bnum(() => it.z - fp(it)[1] / 2 - BB.z0, v => { it.z = BB.z0 + v + fp(it)[1] / 2; fit(it, false); upd(); })),
@@ -1391,8 +1612,22 @@ function vertPanel(b, j) {
 
 // 빠른 도구 막대
 function quick() {
-  const q = $('qb'); if (!sel) { q.hidden = true; return; } q.hidden = false;
+  const q = $('qb'); if (!sel) { q.hidden = !MMODE; if (MMODE) { $('qbn').textContent = '☑ 다중 선택 — 가구를 눌러 추가'; q.querySelectorAll('button,input,span.qi').forEach(e => { e.hidden = !['msel', 'none', 'marq'].includes(e.dataset.q); }); q.querySelector('[data-q=msel]').classList.add('on'); } return; } q.hidden = false;
+  q.querySelectorAll('button,input,span.qi').forEach(e => { e.hidden = false; });
+  q.querySelector('[data-q=msel]').classList.toggle('on', MMODE); q.querySelector('[data-q=marq]').hidden = !(MMODE || isMulti());
+  const gb = q.querySelector('[data-q=grp]');
+  if (isMulti()) {
+    const one = isOneGroup(sel.list);
+    $('qbn').textContent = (one ? `⧉ 그룹${sel.list[0].gid} · ` : '☑ ') + `${sel.list.length}개 선택`;
+    gb.hidden = false; gb.textContent = one ? '⧉ 그룹 해제' : '⧉ 그룹';
+    q.querySelector('[data-q=rot]').hidden = !floorOf(sel.list).length; q.querySelector('[data-q=dup]').hidden = false;
+    if (document.activeElement !== $('qbp')) $('qbp').value = 100;
+    const lb = q.querySelector('[data-q=lock]'); lb.textContent = isLocked(sel) ? '🔒' : '🔓'; lb.title = isLocked(sel) ? '모두 잠금 해제' : '모두 잠금';
+    if (q._last !== sel.list.length) $('qbrot').hidden = true; q._last = sel.list.length;
+    return;
+  }
   const o = sel.o, it = sel.k === 'item';
+  q.querySelector('[data-q=msel]').hidden = !it; gb.hidden = !(it && o.gid); gb.textContent = '⧉ 그룹 선택';
   $('qbn').textContent = it ? `${itemLabel(o)} ${o.name} · ${r1(fpw(o))}×${r1(o.d)}×${r1(o.h)}` : sel.k === 'op' ? `${opLabel(o)} · ${(o.kind === 'win' ? WIN_ST : DOOR_ST).find(s => s[0] === o.st)?.[1] || ''} ${rd(o.w)}×${rd(o.h)}` : sel.k === 'light' ? `${lightLabel(o)} · ${(LKIND[o.kind] || {}).n}` : labelOf(sel);
   q.querySelectorAll('.qi').forEach(e => e.hidden = !it);
   const canRot = (it && o.mt !== 'w') || (sel.k === 'light' && !lightIsWall(o) && (LKIND[o.kind] || {}).rot);
@@ -1403,7 +1638,12 @@ function quick() {
   const lb = q.querySelector('[data-q=lock]'); lb.hidden = false; lb.textContent = isLocked(sel) ? '🔒' : '🔓'; lb.title = isLocked(sel) ? '잠금 해제' : '잠금 (고정)';
 }
 $('qb').addEventListener('click', e => {
-  const b = e.target.closest('[data-q]'); if (!b || !sel) return; const a = b.dataset.q, o = sel.o;
+  const b = e.target.closest('[data-q]'); if (!b || (!sel && !['msel', 'none', 'marq'].includes(b.dataset.q))) return; const a = b.dataset.q, o = sel && sel.o;
+  if (a === 'msel') return setMMode(!MMODE);
+  if (a === 'marq') return startMarq();
+  if (a === 'none') { setMMode(false); return setSel(null); }
+  if (a === 'grp') { if (isMulti()) return isOneGroup(sel.list) ? ungroupSel() : groupSel(); if (sel.k === 'item' && sel.o.gid) return selectItems(groupOf(sel.o), sel.o); return; }
+  if (isMulti() && (a === 'm' || a === 'p')) return scaleMulti(sel.list, a === 'p' ? 1.05 : 1 / 1.05, PREF.mSpread);
   if (a === 'lock') return setLock(sel, isLocked(sel) ? 0 : 1);
   if (a === 'rot') { const p = $('qbrot'); p.hidden = !p.hidden; if (!p.hidden) { p.replaceChildren(rotWidget(o, true)); } return; }
   if (a === 'dup' || a === 'del' || a === 'edit') $('qbrot').hidden = true;
@@ -1413,7 +1653,7 @@ $('qb').addEventListener('click', e => {
     if (a === 'm') { scaleIt(o, 1 / 1.05); sizeChanged(o); } if (a === 'p') { scaleIt(o, 1.05); sizeChanged(o); }
   }
 });
-$('qbp').onchange = e => { const v = parseFloat(e.target.value); if (sel && sel.k === 'item' && v > 0 && !sel.o.lock) { scaleIt(sel.o, v / pctAll(sel.o)); sizeChanged(sel.o); } };
+$('qbp').onchange = e => { const v = parseFloat(e.target.value); if (isMulti()) { if (v > 0) scaleMulti(sel.list, v / 100, PREF.mSpread); e.target.value = 100; return; } if (sel && sel.k === 'item' && v > 0 && !sel.o.lock) { scaleIt(sel.o, v / pctAll(sel.o)); sizeChanged(sel.o); } };
 
 // 방·창호 탭
 function roomArea() { return Math.abs(polyArea(OL)); }
@@ -1497,8 +1737,11 @@ function renderList() {
       h('div', {}, h('b', {}, `${rd(occ / area * 100)}%`), h('small', {}, '바닥 점유율')),
       h('div', {}, h('b', {}, won(price)), h('small', {}, '예상 금액'))),
     warn ? h('p', { class: 'warn' }, `⚠ 확인 필요한 가구 ${warn}개 (겹침 · 창문 가림 · 문 간섭 · 방 밖)`) : null,
+    items.length ? h('div', { class: 'r lsel' }, BTN('☑ 전체 선택', () => selectItems(items, items[items.length - 1], 'sel'), 'c'), selItems().length ? BTN(`선택 ${selItems().length}개 편집`, () => showTab('sel'), 'b') : null, selItems().length ? BTN('선택 해제', () => setSel(null), 'c') : null, warn ? BTN('⚠ 문제 있는 것만', () => selectItems(items.filter(i => i.ov || i.wb || i.db || i.out), null, 'sel'), 'c') : null) : null,
+    items.length ? h('p', { class: 'mu sm' }, '왼쪽 체크로 여러 개를 고르면 한꺼번에 이동·크기·정렬·그룹·복제할 수 있습니다' + (isMobile() ? '' : ' (Shift+클릭도 가능)')) : null,
     h('div', {}, items.length ? items.map(it => {
-      const d = h('div', { class: 'it' + (sel && sel.o === it ? ' s' : ''), onclick: () => setSel({ k: 'item', o: it }), ondblclick: () => { setSel({ k: 'item', o: it }); focusSel(); } }, h('i', { style: `background:${it.color}` }), h('b', { class: 'tag' }, itemLabel(it)), h('span', {}, it.name));
+      const on = selItems().includes(it), cb = h('input', { type: 'checkbox', class: 'lcb', title: '여러 개 선택', onclick: ev => { ev.stopPropagation(); toggleItem(it); } }); cb.checked = on;
+      const d = h('div', { class: 'it' + (on ? ' s' : ''), onclick: ev => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey || MMODE) toggleItem(it); else setSel({ k: 'item', o: it }); }, ondblclick: () => { setSel({ k: 'item', o: it }); focusSel(); } }, cb, h('i', { style: `background:${it.color}` }), h('b', { class: 'tag' }, itemLabel(it)), it.gid ? h('b', { class: 'gtag', title: '그룹' }, '⧉' + it.gid) : null, h('span', {}, it.name));
       if (it.lock) d.append(h('em', { class: 'g' }, '🔒')); if (it.ov) d.append(h('em', {}, '겹침')); if (it.wb) d.append(h('em', {}, '창문 가림')); if (it.db) d.append(h('em', {}, '문 간섭')); if (it.out) d.append(h('em', {}, '방 밖'));
       d.append(h('small', {}, `${r1(fpw(it))}×${r1(it.d)}×${r1(it.h)}` + (it.price ? ` · ${won(it.price)}` : '')));
       const x = h('button', { class: 'x', title: '삭제' }, '×'); x.onclick = ev => { ev.stopPropagation(); setSel({ k: 'item', o: it }); delSel(); }; d.append(x);
@@ -1617,6 +1860,9 @@ function importJSON(t, fn) {
 const TBK = [['snap', '스냅·벽/가구 붙이기'], ['handles', '벽 이동 핸들'], ['shapeEdit', '방 모양 편집 (꼭짓점)'], ['labels', '라벨 (책장1 등)'], ['ceil', '천장 표시'], ['vdoor', '문 표시'], ['vwin', '창문 표시'], ['stack', '소품 위에 올리기'], ['touchSafe', '터치: 선택 후 이동']];
 $('ddm').append(h('div', { class: 'ddb' },
   h('button', { id: 'ddacct', type: 'button', class: 'b', onclick: () => { $('dd').open = false; if (Cloud.user) { showTab('file'); if (mq.matches) setSheet('half'); } else gLogin(); } }, '☁ 로그인'),
+  h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; setMMode(true); } }, '☑ 여러 개 선택 모드'),
+  h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; startMarq(); } }, '▭ 영역으로 선택'),
+  h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; if (items.length) selectItems(items, items[items.length - 1], 'sel'); } }, '◼ 가구 전체 선택'),
   h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; saveFile(fname('3D.png'), shot3D(), 'image/png'); } }, '📷 3D 화면 저장'),
   h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; saveFile(fname('평면도.png'), planCanvas(), 'image/png'); } }, '🗺 평면도 저장')));
 $('ddm').append(...TBK.map(([k, n]) => { const i = h('input', { type: 'checkbox', 'data-k': k }); i.onchange = () => { PREF[k] = i.checked ? 1 : 0; savePref(); onPref(k); }; return h('label', {}, i, ' ' + n); }));
@@ -1637,7 +1883,7 @@ $('undo').onclick = undo; $('redo').onclick = redo;
 $('fabAdd').onclick = () => { showTab('add'); setSheet('half'); setTimeout(() => $('q').focus({ preventScroll: true }), 300); };
 $('fabAI').onclick = () => { showTab('ai'); setSheet('half'); };
 $('fabCam').onclick = () => AI.openPhoto('furniture');
-const HINT = '드래그: 이동 · 빈 곳 드래그: 회전 · 우클릭 드래그: 이동 · 휠: 확대 · 파란 점/주황 화살표: 크기 · R/Shift+R 시계·반시계 90° · Q/E 45° · Del 삭제 · Ctrl+Z 되돌리기 · 더블클릭: 확대';
+const HINT = 'Shift+클릭: 여러 개 선택 · Shift+빈 곳 드래그: 영역 선택 · Ctrl+A 전체 · Ctrl+G 그룹 · 드래그: 이동 · 빈 곳 드래그: 회전 · 우클릭 드래그: 이동 · 휠: 확대 · 파란 점/주황 화살표: 크기 · R/Shift+R 시계·반시계 90° · Q/E 45° · Del 삭제 · Ctrl+Z 되돌리기 · 더블클릭: 확대';
 $('hint').textContent = HINT;
 document.addEventListener('click', e => { document.querySelectorAll('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
 
@@ -1665,7 +1911,7 @@ function resolveLights(t) {
 }
 function resolveOps(t) { if (Array.isArray(t)) return t.flatMap(resolveOps); const s = String(t || '').replace(/\s/g, ''); return OPS.filter(o => opLabel(o) === s || String(o.id) === s.replace('#', '')); }
 function wallIdx(w) { if (w == null) return undefined; if (typeof w === 'number') return clamp(Math.round(w), 0, E.length - 1); const m = /(\d+)/.exec(String(w)); if (m) return clamp(+m[1] - 1, 0, E.length - 1); const map = { N: 0, E: 1, S: 2, W: 3, 뒷벽: 0, 오른쪽: 1, 앞벽: 2, 왼쪽: 3 }; for (const k in map) if (String(w).includes(k)) return Math.min(map[k], E.length - 1); return undefined; }
-const ITEM_KEYS = ['name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
+const ITEM_KEYS = ['gid', 'name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
 function applySet(it, set) {
   ITEM_KEYS.forEach(k => { if (set[k] !== undefined && set[k] !== null) it[k] = set[k]; });
   if (set.type && !TYPES[set.type]) it.type = 'box';
@@ -1698,6 +1944,17 @@ function runActions(actions = []) {
       const op = a.op || a.action;
       if (op === 'add') { const { it, pos } = specToItem(a.item || a); placeNew(it, pos); if (it.mt === 'w' && a.item && a.item.wall != null) { it.wall = wallIdx(a.item.wall); it.ws = a.item.ws ?? E[it.wall].len / 2; fit(it, false); } log.push(`➕ ${itemLabel(it)} ${it.name} 추가`); }
       else if (op === 'update' || op === 'move' || op === 'modify') { const ts = resolveItems(a.target ?? a.targets); if (!ts.length) { log.push(`⚠ 대상 '${a.target}' 없음`); continue; } const st0 = a.set || a, unlock = st0.lock === 0 || st0.lock === false, ok = ts.filter(it => !it.lock || unlock), sk = ts.filter(it => !ok.includes(it)); ok.forEach(it => { applySet(it, st0); mk(it); fit(it, false); }); if (ok.length) log.push(`✏️ ${ok.map(itemLabel).join(', ')} 변경`); if (sk.length) log.push(`🔒 ${sk.map(itemLabel).join(', ')} 잠김 — 변경 안 함`); }
+      else if (['group', 'ungroup', 'align', 'distribute', 'mirror', 'rotateGroup', 'moveGroup', 'select'].includes(op)) {
+        const ts = resolveItems(a.target ?? a.targets); if (!ts.length) { log.push(`⚠ 대상 '${a.target}' 없음`); continue; }
+        if (op === 'group') { const g = nextGid(); ts.forEach(o => { o.gid = g; }); log.push(`⧉ ${ts.length}개를 그룹${g}(으)로 묶음`); }
+        else if (op === 'ungroup') { ts.forEach(o => { delete o.gid; }); log.push(`그룹 해제 ${ts.length}개`); }
+        else if (op === 'align') { alignMulti(ts, a.how || 'cx'); log.push(`↔ ${ts.length}개 정렬`); }
+        else if (op === 'distribute') { distMulti(ts, a.axis === 'z' ? 'z' : 'x', a.gap == null ? null : +a.gap); log.push(`${ts.length}개 간격 정리`); }
+        else if (op === 'mirror') { mirrorMulti(ts, a.axis === 'z' ? 'z' : 'x'); log.push(`${ts.length}개 반전`); }
+        else if (op === 'rotateGroup') { rotMulti(ts, -(+a.cw || +a.deg || 90), !!a.each); log.push(`⟳ ${ts.length}개 회전`); }
+        else if (op === 'moveGroup') { moveMulti(ts, +a.dx || 0, +a.dz || 0); log.push(`${ts.length}개 이동`); }
+        if (op === 'select' || op === 'group') selectItems(ts, ts[ts.length - 1]);
+      }
       else if (op === 'delete' || op === 'remove') { const ts = resolveItems(a.target ?? a.targets), ok = ts.filter(it => !it.lock); ok.forEach(it => delObj({ k: 'item', o: it })); log.push(`🗑 ${ok.length}개 삭제`); if (ok.length < ts.length) log.push(`🔒 잠긴 ${ts.length - ok.length}개는 삭제 안 함`); }
       else if (op === 'light' || op === 'lights') {
         const ts = resolveLights(a.targets ?? a.target ?? 'all'), set = a.set || {};
