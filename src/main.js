@@ -27,7 +27,7 @@ const LS = {
 };
 const K_PROJ = 'room3d.v2.projects', K_CUR = 'room3d.v2.cur', K_SZ = 'room3d.v2.sizes', K_CUS = 'room3d.v2.custom', K_REC = 'room3d.v2.recent', K_PREF = 'room3d.v2.prefs';
 let SZ = LS.get(K_SZ, {}), CUSTOM = LS.get(K_CUS, []), RECENT = LS.get(K_REC, []), PROJ = LS.get(K_PROJ, {});
-const PREF = Object.assign({ snap: 1, handles: 1, labels: 0, night: 0, vdoor: 1, vwin: 1, ceil: 1, lock: 1, remember: 1, stack: 1, tab: 'add', touchSafe: 1, shapeEdit: 0 }, LS.get(K_PREF, {}));
+const PREF = Object.assign({ snap: 1, handles: 1, labels: 0, night: 0, vdoor: 1, vwin: 1, ceil: 1, lock: 1, remember: 1, stack: 1, tab: 'add', touchSafe: 1, shapeEdit: 0, site: 1, pickWin: 1, pickDoor: 1, pickLight: 1 }, LS.get(K_PREF, {}));
 PREF.dims = Object.assign({ room: 1, ops: 0, item: 1, gap: 1 }, PREF.dims || {});
 const savePref = () => { LS.set(K_PREF, PREF); cloudSettingsSoon(); };
 
@@ -115,7 +115,7 @@ function switchSpace(id, quiet) {
   if (id === SPID || !SPACES.some(x => x.id === id)) return;
   flush(); const cur = SPACES.find(x => x.id === SPID); if (cur) { cur.s = curSpaceState(); cur.kind = spKind(R); }
   const tgt = SPACES.find(x => x.id === id), st = { ...(tgt.s || roomState()), spaces: SPACES.map(x => x.id === id ? { id: x.id, name: x.name, kind: x.kind } : x), spid: id };
-  load(st); commit(); fitView(); renderRoom(); renderSpacePill(); if (!quiet) toast(`${tgt.kind === 'out' ? '🌳' : '🏠'} '${tgt.name}'(으)로 이동`);
+  load(st); if (R.kind === 'out' && (R.corridors || []).length) { syncCorrOpenings(R.houses || [], R.corridors); buildRoom(); } commit(); fitView(); renderRoom(); renderSpacePill(); if (!quiet) toast(`${tgt.kind === 'out' ? '🌳' : '🏠'} '${tgt.name}'(으)로 이동`);
 }
 function addSpace(name, state) {
   const id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
@@ -155,7 +155,8 @@ function addSpaceDlg(kind) {
 function spaceBlock() {
   return h('div', { class: 'spbox' },
     h('div', { class: 'ch spc' }, SPACES.map(sp => BTN((sp.kind === 'out' ? '🌳 ' : '🏠 ') + sp.name, () => switchSpace(sp.id), 'c' + (sp.id === SPID ? ' on' : '')))),
-    h('div', { class: 'r' }, BTN('＋ 방 추가', () => addSpaceDlg('room'), 'b'), BTN('＋ 야외 추가', () => addSpaceDlg('out'), 'b'), BTN('📷 사진·도면으로 공간 만들기', () => AI.openPhoto('room'), 'o')),
+    h('div', { class: 'r' }, BTN('🏘 모든 공간 함께 보기', goOverview, 'b'), BTN('＋ 방 추가', () => addSpaceDlg('room'), 'b'), BTN('＋ 야외 추가', () => addSpaceDlg('out'), 'b'), BTN('📷 사진·도면으로 공간 만들기', () => AI.openPhoto('room'), 'o')),
+    R.kind !== 'out' && SPACES.some(x => x.kind === 'out') ? h('div', { class: 'cg' }, bchk('이 방 안에서도 옆 공간·통로·야외 배경 함께 보기', () => PREF.site, v => { PREF.site = v ? 1 : 0; savePref(); buildSiteView(); applyLightMode(); })) : null,
     h('div', { class: 'r' }, BTN('✎ 이름 변경', () => renameSpace(SPID), 'c'), BTN('⧉ 이 공간 복제', () => dupSpace(SPID), 'c'), SPACES.length > 1 ? BTN('🗑 이 공간 삭제', () => deleteSpace(SPID), 'c danger') : null));
 }
 function renderSpacePill() { const el = $('spcPill'); if (!el) return; const sp = SPACES.find(x => x.id === SPID) || {}; el.textContent = (spKind(R) === 'out' ? '🌳 ' : '🏠 ') + (sp.name || '공간') + (SPACES.length > 1 ? ` (${SPACES.length})` : '') + ' ▾'; const mb = $('ddspc'); if (mb) mb.textContent = '🏠 공간: ' + (sp.name || '') + ' (바꾸기·추가)'; }
@@ -188,12 +189,13 @@ const TV = (o, k, v) => Object.defineProperty(o, k, { value: v, writable: true, 
 function buildHouses() {
   disposeTree(houseG); houseG.clear();
   if (R.kind !== 'out') return;
-  (R.houses || []).forEach(hs => {
+  (R.houses || []).forEach((hs, i) => { if (!hs.id) hs.id = 'h' + i + Date.now().toString(36);
     const sp = SPACES.find(x => x.id === hs.sid); if (!sp || !sp.s || spKind(sp.s.R) === 'out') { TV(hs, 'g', null); return; }
     const m = buildHouseModel(sp.s, hs.roof || 'flat'), g = new THREE.Group(); g.add(m.body); TV(hs, '_w', m.W); TV(hs, '_d', m.D); TV(hs, '_h', m.H); TV(hs, '_name', sp.name);
     g.position.set(hs.x, 0, hs.z); g.rotation.y = (hs.rot || 0) * PI / 180; g.traverse(o => { o.userData.house = hs; });
     TV(hs, 'g', g); houseG.add(g);
   });
+  buildCorridors(R.houses || [], R.corridors, houseG);
 }
 function placeHouses(sids) {
   if (R.kind !== 'out') return toast('야외 공간에서만 집을 배치할 수 있습니다');
@@ -205,7 +207,7 @@ function placeHouses(sids) {
   list.forEach((sp, i) => { R.houses.push({ id: 'h' + Date.now().toString(36) + i, sid: sp.id, x: r1(x + dims[i].W / 2), z: r1(z - (Dt - dims[i].D) / 2), rot: 0, roof: 'flat' }); x += dims[i].W + gap; });
   buildRoom(); upd(); renderRoom(); toast(`🏠 ${list.map(s => s.name).join(', ')} — 집을 야외에 배치했습니다 (끌어서 이동, 더블클릭하면 그 방으로 들어갑니다)`, 6000);
 }
-function removeHouse(hs) { R.houses = (R.houses || []).filter(x => x !== hs); if (sel && sel.o === hs) setSel(null); buildRoom(); upd(); renderRoom(); }
+function removeHouse(hs) { R.houses = (R.houses || []).filter(x => x !== hs); if ((R.corridors || []).some(c => c.a === hs.id || c.b === hs.id)) { R.corridors = R.corridors.filter(c => c.a !== hs.id && c.b !== hs.id); syncCorrOpenings(R.houses, R.corridors); } if (sel && sel.o === hs) setSel(null); buildRoom(); upd(); renderRoom(); }
 function housePanel(b, hs) {
   const RB = () => { buildRoom(); updSelBox(); commitSoon(); syncSel(); };
   app(b, h('div', { class: 'lab' }, `🏠 ${hs._name || '집'}`),
@@ -213,6 +215,7 @@ function housePanel(b, hs) {
     G(3, F('왼쪽에서 (중심)', bnum(() => hs.x - BB.x0, v => { hs.x = BB.x0 + v; if (hs.g) hs.g.position.x = hs.x; updSelBox(); commitSoon(); })), F('뒤에서 (중심)', bnum(() => hs.z - BB.z0, v => { hs.z = BB.z0 + v; if (hs.g) hs.g.position.z = hs.z; updSelBox(); commitSoon(); })), F('각도 (시계°)', bnum(() => norm360(-(hs.rot || 0)), v => { hs.rot = norm360(-v); if (hs.g) hs.g.rotation.y = hs.rot * PI / 180; updSelBox(); commitSoon(); }, { step: 15 }))),
     h('div', { class: 'r' }, BTN('⟲ 90°', () => rotSel(90), 'c'), BTN('⟳ 90°', () => rotSel(-90), 'c'), BTN('⟳ 180°', () => rotSel(180), 'c'), BTN('가운데로', () => { hs.x = BB.x0 + BB.W / 2; hs.z = BB.z0 + BB.D / 2; RB(); }, 'c')),
     F('지붕', bsel(ROOFS, () => hs.roof || 'flat', v => { hs.roof = v; RB(); })),
+    attachBlock(hs),
     h('div', { class: 'r' }, BTN('🚪 이 방으로 들어가기', () => switchSpace(hs.sid), 'b'), BTN('야외에서 빼기', () => removeHouse(hs), 'o danger')));
 }
 function housesBlock() {
@@ -223,6 +226,142 @@ function housesBlock() {
     h('p', { class: 'mu sm' }, '집을 끌어서 옮기고, 선택 탭에서 회전·지붕을 바꿀 수 있습니다. 집을 더블클릭하면 그 방 안으로 들어갑니다.'));
 }
 const envG = new THREE.Group(); scene.add(envG);
+// ---------- 공간 연결: 전체 함께 보기 · 붙이기 · 연결 통로 · 배경 ----------
+const rotPt = (x, z, deg) => { const a = deg * PI / 180, c = Math.cos(a), s = Math.sin(a); return [x * c + z * s, -x * s + z * c]; }; // three.js rotateY 와 같은 방향
+function roomInfo(st) { const r = normState(st).R, E2 = edgesOf(r.pts, r.bul || {}), b = bbox(outline(E2)); return { E: E2, b, c: [b.x0 + b.W / 2, b.z0 + b.D / 2], H: r.H || 230 }; }
+const spOf = id => SPACES.find(x => x.id === id);
+function hFoot(hs, ri) { ri = ri || roomInfo(spOf(hs.sid).s); const hw = ri.b.W / 2, hd = ri.b.D / 2; return bbox([[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([x, z]) => { const [rx, rz] = rotPt(x, z, hs.rot || 0); return [hs.x + rx, hs.z + rz]; })); }
+function siteToRoom(hs, ri, X, Z) { const [x, z] = rotPt(X - hs.x, Z - hs.z, -(hs.rot || 0)); return [x + ri.c[0], z + ri.c[1]]; }
+const validHouse = hs => { const sp = spOf(hs.sid); return sp && sp.s && spKind(sp.s.R) !== 'out'; };
+// 통로 모양 계산 (사이트 좌표, 축 정렬): 일자(가로/세로) 또는 ㄱ자. 붙어 있으면 통로 없이 벽에 문만
+function corrGeom(c, houses) {
+  const A = houses.find(x => x.id === c.a), B = houses.find(x => x.id === c.b); if (!A || !B || !validHouse(A) || !validHouse(B)) return null;
+  const ia = roomInfo(spOf(A.sid).s), ib = roomInfo(spOf(B.sid).s), fa = hFoot(A, ia), fb = hFoot(B, ib), w = c.w || 110, segs = [], ends = [];
+  const ov = (a0, a1, b0, b1) => [Math.max(a0, b0), Math.min(a1, b1)], [oz0, oz1] = ov(fa.z0, fa.z1, fb.z0, fb.z1), [ox0, ox1] = ov(fa.x0, fa.x1, fb.x0, fb.x1);
+  if (oz1 - oz0 >= w + 20 && (fa.x1 <= fb.x0 + 2 || fb.x1 <= fa.x0 + 2)) {
+    const [L, Rr, hl, hr, il, ir] = fa.x1 <= fb.x0 + 2 ? [fa, fb, A, B, ia, ib] : [fb, fa, B, A, ib, ia], zc = clamp((oz0 + oz1) / 2 + (c.off || 0), oz0 + w / 2 + 5, oz1 - w / 2 - 5);
+    segs.push({ ax: 'x', a0: L.x1, a1: Rr.x0, c: zc }); ends.push({ hs: hl, ri: il, X: L.x1 - 2, Z: zc }, { hs: hr, ri: ir, X: Rr.x0 + 2, Z: zc });
+  } else if (ox1 - ox0 >= w + 20 && (fa.z1 <= fb.z0 + 2 || fb.z1 <= fa.z0 + 2)) {
+    const [T, Bt, ht, hb, it2, ib2] = fa.z1 <= fb.z0 + 2 ? [fa, fb, A, B, ia, ib] : [fb, fa, B, A, ib, ia], xc = clamp((ox0 + ox1) / 2 + (c.off || 0), ox0 + w / 2 + 5, ox1 - w / 2 - 5);
+    segs.push({ ax: 'z', a0: T.z1, a1: Bt.z0, c: xc }); ends.push({ hs: ht, ri: it2, X: xc, Z: T.z1 - 2 }, { hs: hb, ri: ib2, X: xc, Z: Bt.z0 + 2 });
+  } else {
+    const bc = [(fb.x0 + fb.x1) / 2, (fb.z0 + fb.z1) / 2], right = bc[0] > (fa.x0 + fa.x1) / 2, xA = right ? fa.x1 : fa.x0;
+    const zA = clamp(bc[1] + (c.off || 0), fa.z0 + w / 2 + 10, fa.z1 - w / 2 - 10), down = bc[1] > zA, zB = down ? fb.z0 : fb.z1;
+    segs.push({ ax: 'x', a0: Math.min(xA, bc[0] + (right ? w / 2 : -w / 2)), a1: Math.max(xA, bc[0] + (right ? w / 2 : -w / 2)), c: zA, open: { side: down ? 1 : -1, at: right ? 'end' : 'start' } });
+    segs.push({ ax: 'z', a0: Math.min(zA + (down ? w / 2 : -w / 2), zB), a1: Math.max(zA + (down ? w / 2 : -w / 2), zB), c: bc[0] });
+    ends.push({ hs: A, ri: ia, X: xA + (right ? -2 : 2), Z: zA }, { hs: B, ri: ib, X: bc[0], Z: zB + (down ? 2 : -2) });
+  }
+  return { segs, ends, w, h: Math.min(c.h || 215, ia.H - 5, ib.H - 5), Hc: Math.min(ia.H, ib.H) };
+}
+function buildCorridors(houses, corrs, into) {
+  (corrs || []).forEach(c => {
+    const gm = corrGeom(c, houses); if (!gm) return; const { w, Hc } = gm, g = new THREE.Group(), fm = new THREE.MeshLambertMaterial({ color: 0xc9a77c }), wm = new THREE.MeshLambertMaterial({ color: new THREE.Color(c.wc || '#efe9df').getHex(), side: THREE.DoubleSide }), rm = new THREE.MeshLambertMaterial({ color: 0xb9b5ad });
+    const box = (sx, sy, sz, x, y, z, m) => { const q = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.5, sx), sy, Math.max(0.5, sz)), m); q.position.set(x, y + sy / 2, z); g.add(q); };
+    gm.segs.forEach(sg => {
+      const L = sg.a1 - sg.a0; if (L < 3) return; const m = (sg.a0 + sg.a1) / 2;
+      const along = (len, h, thick, at, off, mat, y = 0) => sg.ax === 'x' ? box(len, h, thick, at, y, sg.c + off, mat) : box(thick, h, len, sg.c + off, y, at, mat);
+      along(L, 3, w + 16, m, 0, fm, -3); along(L, 12, w + 32, m, 0, rm, Hc);
+      [-1, 1].forEach(sd => { if (sg.open && sg.open.side === sd) { const cut = w + 8, a0 = sg.open.at === 'end' ? sg.a0 : sg.a0 + cut, a1 = sg.open.at === 'end' ? sg.a1 - cut : sg.a1; if (a1 - a0 > 2) along(a1 - a0, Hc, 8, (a0 + a1) / 2, sd * (w / 2 + 4), wm); } else along(L, Hc, 8, m, sd * (w / 2 + 4), wm); });
+      if (sg.open) { const endX = sg.open.at === 'end' ? sg.a1 : sg.a0; along(8, Hc, w + 16, endX + (sg.open.at === 'end' ? -4 : 4), 0, wm); }
+    });
+    g.traverse(o => { o.userData.corr = c; }); into.add(g);
+  });
+}
+// 통로 끝마다 양쪽 방의 벽에 개구부/문을 냄 (방 데이터에 저장, 통로를 지우면 같이 지워짐)
+function corrOps(c, houses) {
+  const gm = corrGeom(c, houses); if (!gm) return [];
+  return gm.ends.map(en => {
+    const sp = spOf(en.hs.sid), [lx, lz] = siteToRoom(en.hs, en.ri, en.X, en.Z); let best = null;
+    en.ri.E.forEach(e => { if (Math.abs(e.h) > 0.5) return; const q = segDist(e, lx, lz); if (!best || q.d < best.d) best = { e, ...q }; });
+    if (!best || best.d > 60) return null;
+    const ow = Math.min(gm.w, best.e.len - 20), s0 = clamp(best.s, ow / 2 + 5, best.e.len - ow / 2 - 5);
+    return { sp, op: { kind: 'door', st: c.door || 'open', wall: best.e.i, s: r1(s0), w: r1(ow), h: gm.h, y: 0, fc: '#f3f2ee', dc: '#f3f2ee', hinge: 'L', sw: 'in', ang: 0, corr: c.id } };
+  }).filter(Boolean);
+}
+function syncCorrOpenings(houses, corrs) {
+  SPACES.forEach(sp => { if (sp.s && sp.s.ops) sp.s.ops = sp.s.ops.filter(o => !o.corr); });
+  (corrs || []).forEach(c => corrOps(c, houses).forEach(({ sp, op }) => { const ops = sp.s.ops = [...(sp.s.ops || [])]; ops.push({ id: 90000 + ops.length + Math.floor(Math.random() * 9000), ...op }); }));
+}
+// 기존 창문·문과 겹치지 않는 위치로 통로를 자동으로 옮김
+function autoOffset(c, houses) {
+  const clash = () => corrOps(c, houses).some(({ sp, op }) => (sp.s.ops || []).some(o => !o.corr && o.wall === op.wall && Math.abs(o.s - op.s) < (o.w + op.w) / 2 + 10));
+  for (let k = 0; k <= 60; k++) { const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 10; c.off = off; if (!clash()) return true; }
+  c.off = 0; return false;
+}
+// 집 끌 때 다른 집 벽에 딱 붙이기 (30cm 이내)
+function snapHouse(hs) {
+  const me = hFoot(hs), T = 30; let dx = null, dz = null;
+  (R.houses || []).forEach(o => { if (o === hs || !validHouse(o)) return; const f = hFoot(o), zov = Math.min(me.z1, f.z1) - Math.max(me.z0, f.z0), xov = Math.min(me.x1, f.x1) - Math.max(me.x0, f.x0);
+    if (zov > -T) [[f.x1 - me.x0], [f.x0 - me.x1]].forEach(([d]) => { if (Math.abs(d) < T && (dx == null || Math.abs(d) < Math.abs(dx))) dx = d; });
+    if (xov > -T) [[f.z1 - me.z0], [f.z0 - me.z1]].forEach(([d]) => { if (Math.abs(d) < T && (dz == null || Math.abs(d) < Math.abs(dz))) dz = d; });
+    if (dx != null && zov > 0) [[f.z0 - me.z0], [f.z1 - me.z1]].forEach(([d]) => { if (Math.abs(d) < T && dz == null) dz = d; });
+    if (dz != null && xov > 0) [[f.x0 - me.x0], [f.x1 - me.x1]].forEach(([d]) => { if (Math.abs(d) < T && dx == null) dx = d; }); });
+  if (dx != null) hs.x = r1(hs.x + dx); if (dz != null) hs.z = r1(hs.z + dz);
+}
+function attachHouse(hs, tgt, side, align, door) {
+  const me = hFoot(hs), f = hFoot(tgt), w = me.x1 - me.x0, d = me.z1 - me.z0;
+  if (side === 'R' || side === 'L') { hs.x = side === 'R' ? f.x1 + w / 2 : f.x0 - w / 2; hs.z = align === 'start' ? f.z0 + d / 2 : align === 'end' ? f.z1 - d / 2 : (f.z0 + f.z1) / 2; }
+  else { hs.z = side === 'F' ? f.z1 + d / 2 : f.z0 - d / 2; hs.x = align === 'start' ? f.x0 + w / 2 : align === 'end' ? f.x1 - w / 2 : (f.x0 + f.x1) / 2; }
+  hs.x = r1(hs.x); hs.z = r1(hs.z);
+  if (door) { const nc = { id: 'c' + Date.now().toString(36), a: tgt.id, b: hs.id, w: door === 'jung3' ? 180 : 100, door }; R.corridors = [...(R.corridors || []).filter(c => !((c.a === hs.id && c.b === tgt.id) || (c.a === tgt.id && c.b === hs.id))), nc]; autoOffset(nc, R.houses); }
+  syncCorrOpenings(R.houses, R.corridors); buildRoom(); upd(); renderSel(); renderRoom();
+  toast(`🏠 '${hs._name}'을(를) '${tgt._name}' ${({ R: '오른쪽', L: '왼쪽', F: '앞쪽', B: '뒤쪽' })[side]}에 붙였습니다${door ? ' — 맞닿은 벽에 문을 냈습니다' : ''}`, 5000);
+}
+function addCorridor(a, b, w, door) {
+  if (!a || !b || a === b) return toast('서로 다른 두 공간을 고르세요');
+  R.corridors = [...(R.corridors || []), { id: 'c' + Date.now().toString(36), a, b, w: +w || 110, door: door || 'open' }];
+  const gm0 = corrGeom(R.corridors.at(-1), R.houses || []); if (!gm0) { R.corridors.pop(); return toast('통로를 만들 수 없습니다'); }
+  const moved = !autoOffset(R.corridors.at(-1), R.houses || []) ? ' (기존 창호와 겹칠 수 있어요 — ◀ ▶로 옮기세요)' : R.corridors.at(-1).off ? ' (기존 창문·문을 피해 위치를 옮겼습니다)' : ''; const gm = corrGeom(R.corridors.at(-1), R.houses || []);
+  syncCorrOpenings(R.houses, R.corridors); buildRoom(); upd(); renderRoom();
+  toast((gm.segs.some(s => s.a1 - s.a0 > 3) ? `🔗 연결 통로를 만들고 양쪽 방 벽에 ${door === 'open' ? '개구부' : '문'}를 냈습니다` : '🔗 두 공간이 맞닿아 있어 벽에 문만 냈습니다') + moved, 5000);
+}
+function removeCorridor(c) { R.corridors = (R.corridors || []).filter(x => x !== c); syncCorrOpenings(R.houses, R.corridors); buildRoom(); upd(); renderRoom(); toast('🗑 연결 통로를 지웠습니다 (벽의 문도 함께)'); }
+const DOORS_C = [['open', '개구부 (문 없이 뚫림)'], ['swing', '여닫이문'], ['slide', '미닫이문'], ['jung3', '3연동 중문'], ['double', '양개문']];
+function corridorBlock() {
+  const hs = (R.houses || []).filter(validHouse); if (hs.length < 2) return h('p', { class: 'mu sm' }, '공간(집)이 2개 이상 배치되면 붙이거나 연결 통로를 만들 수 있습니다.');
+  const opt = () => hs.map(x => h('option', { value: x.id }, x._name || '집'));
+  const a = h('select', {}, opt()), b = h('select', {}, opt()), w = h('input', { type: 'number', value: 110, min: 70, max: 400 }), dr = h('select', {}, DOORS_C.map(([k, n]) => h('option', { value: k }, n))); b.value = hs[1].id;
+  return h('div', { class: 'spbox' },
+    G(2, F('공간 A', a), F('공간 B', b)), G(2, F('통로 폭 (cm)', w), F('방 벽에 낼 문', dr)),
+    h('div', { class: 'r' }, BTN('🔗 연결 통로 만들기', () => addCorridor(a.value, b.value, w.value, dr.value), 'b')),
+    (R.corridors || []).length ? h('div', {}, R.corridors.map(c => { const A = hs.find(x => x.id === c.a), B = hs.find(x => x.id === c.b); return h('div', { class: 'it' }, h('span', {}, `🔗 ${A ? A._name : '?'} ↔ ${B ? B._name : '?'} · 폭 ${c.w} · ${(DOORS_C.find(d => d[0] === c.door) || [])[1] || ''}`), h('button', { class: 'c', title: '통로 위치 옮기기', onclick: () => { c.off = (c.off || 0) - 20; syncCorrOpenings(R.houses, R.corridors); buildRoom(); upd(); } }, '◀'), h('button', { class: 'c', title: '통로 위치 옮기기', onclick: () => { c.off = (c.off || 0) + 20; syncCorrOpenings(R.houses, R.corridors); buildRoom(); upd(); } }, '▶'), h('button', { class: 'x', title: '통로 지우기', onclick: () => removeCorridor(c) }, '×')); })) : null,
+    h('p', { class: 'mu sm' }, '떨어져 있으면 일자·ㄱ자 통로가 생기고, 맞닿아 있으면 벽에 문만 냅니다. 집을 옮기면 통로와 문 위치가 자동으로 따라갑니다.'));
+}
+function attachBlock(hs) {
+  const others = (R.houses || []).filter(x => x !== hs && validHouse(x)); if (!others.length) return null;
+  const t = h('select', {}, others.map(x => h('option', { value: x.id }, x._name || '집'))), sd = h('select', {}, [['R', '오른쪽에'], ['L', '왼쪽에'], ['F', '앞쪽에'], ['B', '뒤쪽에']].map(([k, n]) => h('option', { value: k }, n))), al = h('select', {}, [['center', '가운데 맞춤'], ['start', '뒤/왼쪽 끝 맞춤'], ['end', '앞/오른쪽 끝 맞춤']].map(([k, n]) => h('option', { value: k }, n))), dr = h('select', {}, h('option', { value: '' }, '문 없이 벽만 맞닿게'), DOORS_C.map(([k, n]) => h('option', { value: k }, '맞닿은 벽에 ' + n)));
+  return h('div', { class: 'spbox' }, h('b', {}, '🧲 다른 공간에 붙이기'), G(2, F('대상', t), F('위치', sd)), G(2, F('정렬', al), F('연결', dr)), h('div', { class: 'r' }, BTN('붙이기', () => attachHouse(hs, others.find(x => x.id === t.value), sd.value, al.value, dr.value), 'b')), h('p', { class: 'mu sm' }, '끌어서 다른 집 가까이 가져가도 벽에 자동으로 딱 붙습니다.'));
+}
+// 전체 함께 보기: 배경 야외로 가서 아직 안 놓인 방을 모두 배치 (야외가 없으면 새로 만듦)
+function goOverview() {
+  let bg = SPACES.find(x => x.kind === 'out' && (x.id === SPID ? (R.houses || []).length : x.s && (x.s.R.houses || []).length)) || SPACES.find(x => x.kind === 'out');
+  const rooms = () => SPACES.filter(x => x.kind !== 'out').map(x => x.id);
+  if (!bg) { const rs = rooms(); if (!rs.length) return toast('공간이 없습니다'); addSpace('전체 배치 (배경)', outdoorState('field', 1600, 1300)); placeHouses(rs); return; }
+  if (bg.id !== SPID) switchSpace(bg.id, true);
+  const placed = new Set((R.houses || []).map(x => x.sid)), rest = rooms().filter(id => !placed.has(id));
+  if (rest.length) placeHouses(rest); else toast('🏘 모든 공간을 함께 보고 있습니다 — 집을 끌어 옮기거나 붙이고, 더블클릭하면 그 방으로 들어갑니다', 5000);
+}
+// 방 안에서도 옆 공간·통로·야외 배경이 보이게 (옵션)
+const siteG = new THREE.Group(); scene.add(siteG);
+function buildSiteView() {
+  disposeTree(siteG); siteG.clear(); siteG.userData.on = false;
+  if (R.kind === 'out' || !PREF.site) { opG.traverse(o => { if (o.userData.scenery) o.visible = true; }); return; }
+  const bg = SPACES.find(x => x.kind === 'out' && x.s && (x.s.R.houses || []).some(hh => hh.sid === SPID)) || SPACES.find(x => x.kind === 'out' && x.s);
+  if (!bg) return;
+  const bR = normState(bg.s).R, houses = (bR.houses || []), mine = houses.find(hh => hh.sid === SPID), bE = edgesOf(bR.pts, bR.bul || {}), bBB = bbox(outline(bE));
+  const g1 = new THREE.Group(), g2 = new THREE.Group(); g1.add(g2); siteG.add(g1);
+  if (mine) { const ri = roomInfo(curSpaceState()); g1.position.set(ri.c[0], 0, ri.c[1]); g1.rotation.y = -(mine.rot || 0) * PI / 180; g2.position.set(-mine.x, 0, -mine.z); }
+  else { g2.position.set(BB.x0 + BB.W / 2 - (bBB.x0 + bBB.W / 2), 0, BB.z0 + BB.D / 2 - (bBB.z0 + bBB.D / 2)); }
+  const D0 = ENV_DEF[bR.env] || ENV_DEF.field, gt = groundTex(bR.gk || D0.g, bR.gc || D0.gc), S = 24000, tex = gt.tex.clone(); tex.needsUpdate = true; tex.repeat.set(S / gt.u, S / gt.u);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(S, S), new THREE.MeshLambertMaterial({ map: tex })); ground.rotation.x = -PI / 2; ground.position.set(bBB.x0 + bBB.W / 2, -11.5, bBB.z0 + bBB.D / 2); g2.add(ground);
+  const tm = bR.vtime && bR.vtime !== 'auto' ? bR.vtime : PREF.night ? 'night' : 'day'; g2.add(buildEnv(bR, { ...bBB, W: bBB.W, D: bBB.D }, tm));
+  houses.forEach(hs => { if (hs.sid === SPID || !validHouse(hs)) return; const m = buildHouseModel(spOf(hs.sid).s, hs.roof || 'flat'), g = new THREE.Group(); g.add(m.body); g.position.set(hs.x, 0, hs.z); g.rotation.y = (hs.rot || 0) * PI / 180; g.traverse(o => { o.userData.siteRoom = hs.sid; }); g2.add(g); });
+  buildCorridors(houses, bR.corridors, g2);
+  siteG.userData.on = true; siteG.userData.time = tm;
+  opG.traverse(o => { if (o.userData.scenery) o.visible = false; }); // 창밖 그림 대신 실제 바깥이 보이게
+  applyLightMode();
+}
+
 function buildOutdoor() {
   const D0 = ENV_DEF[R.env] || ENV_DEF.field, gk = R.gk || D0.g, gc = R.gc || D0.gc, t = vtimeNow(); R.vtimeNow = t;
   const gt = groundTex(gk, gc), S = 24000, tex = gt.tex.clone(); tex.needsUpdate = true; tex.repeat.set(S / gt.u, S / gt.u);
@@ -482,6 +621,7 @@ function applyLightMode() {
     hemi.color.set(0xffffff); hemi.groundColor.set(0xd8cfc0); dl.color.set(0xffffff); dl.position.set(200, 500, 400); scene.fog = null;
     amb.intensity = n ? 0.14 : 0.56; hemi.intensity = n ? 0.04 : 0.1; dl.intensity = n ? 0.03 : 0.42;
     scene.background = n ? new THREE.Color(0x14161b) : null;
+    if (siteG.userData.on) { const tm2 = n ? 'night' : (siteG.userData.time === 'night' ? 'day' : siteG.userData.time || 'day'); scene.background = skyTex(tm2); scene.fog = new THREE.Fog(FOGC[tm2] || FOGC.day, 5000, 22000); }
   }
   const dark = out ? tm === 'night' : n; scene.traverse(o => { if (o.isPointLight) o.intensity = o.userData.base * (dark ? 1 : out ? 0.25 : 0.12); });
   items.forEach(it => it.g && applyLightModeItem(it));
@@ -903,7 +1043,7 @@ function load(st0, keepSel) {
   applyLightMode();
   let s = null;
   if (keepSel && sk) { const pool = sk[0] === 'item' ? items : sk[0] === 'op' ? OPS : LIGHTS, o = pool.find(x => x.id === sk[1]); if (o) s = { k: sk[0], o }; }
-  setSel(s); check(); dims(); renderRoom(); renderLights(); markList(); updArea(); renderFile(); renderSpacePill();
+  setSel(s); check(); dims(); renderRoom(); renderLights(); markList(); updArea(); renderFile(); renderSpacePill(); buildSiteView();
 }
 function openProject(name, fresh, keepView) {
   flush(); if (name !== projName) LS.set(K_OPENED, Date.now()); projName = name;
@@ -1004,7 +1144,7 @@ function dupSel() {
 }
 function rotSel(deg = 90) {
   if (!sel) return; if (isMulti()) return rotMulti(sel.list, deg, PREF.rotEach);
-  if (sel.k === 'house') { const hs = sel.o; if (hs.lock) return toast('잠긴 집입니다'); hs.rot = norm360((hs.rot || 0) + deg); if (hs.g) hs.g.rotation.y = hs.rot * PI / 180; updSelBox(); syncSel(); return upd(); }
+  if (sel.k === 'house') { const hs = sel.o; if (hs.lock) return toast('잠긴 집입니다'); hs.rot = norm360((hs.rot || 0) + deg); if (hs.g) hs.g.rotation.y = hs.rot * PI / 180; if ((R.corridors || []).length) { syncCorrOpenings(R.houses, R.corridors); buildRoom(); } updSelBox(); syncSel(); return upd(); }
   if (sel.k === 'item') { const it = sel.o; if (it.lock) return toast('잠긴 가구입니다'); if (it.mt === 'w') return toast('벽 부착 가구는 벽 방향을 따릅니다'); it.rot = norm360((it.rot || 0) + deg); fit(it, false); upd(); }
   else if (sel.k === 'light' && !lightIsWall(sel.o)) { if (lockGuard(sel)) return; sel.o.rot = norm360((sel.o.rot || 0) + deg); placeLight(sel.o); upd(); }
 }
@@ -1327,7 +1467,8 @@ function wallPlaneHit(e) { const n = new THREE.Vector3(e.n[0], 0, e.n[1]); retur
 function pick() {
   const hs = [...hdG.children]; if (sel && sel.k === 'item' && sel.o.g.userData.hd) hs.push(...sel.o.g.userData.hd);
   const h0 = ray.intersectObjects(hs, true)[0]; if (h0) return h0;
-  return ray.intersectObjects([...items.map(i => i.g.userData.m), opG, ltG, ...(R.kind === 'out' ? [houseG] : [])], true).find(h => h.object.visible !== false && !h.object.userData.scenery) || null;
+  const okPick = hh => { let o = hh.object; while (o) { const u = o.userData; if (u.op) return u.op.kind === 'win' ? !!PREF.pickWin : !!PREF.pickDoor; if (u.lt) return !!PREF.pickLight; if (u.it || u.house) return true; o = o.parent; } return true; };
+  return ray.intersectObjects([...items.map(i => i.g.userData.m), opG, ltG, ...(R.kind === 'out' ? [houseG] : [])], true).find(h => h.object.visible !== false && !h.object.userData.scenery && okPick(h)) || null;
 }
 function classify(h) {
   let o = h.object;
@@ -1377,7 +1518,7 @@ cv.addEventListener('pointermove', e => {
   if (!drag) { if (e.pointerType === 'mouse' && !raf) raf = requestAnimationFrame(() => { raf = 0; const h = pick(), f = h && classify(h); cv.style.cursor = mode === 'measure' ? 'crosshair' : f ? (f.k === 'room' ? (f.h.t === 'edge' ? 'move' : 'pointer') : f.k === 'rh' ? 'nwse-resize' : 'grab') : 'default'; }); return; }
   const d = drag;
   if (d.k === 'marq') { marqRect(d, e.clientX, e.clientY); return; }
-  if (d.k === 'house') { const p = hitY(d.py); if (!p) return; const hs = d.hs; hs.x = snapV(p.x + d.ox, 5); hs.z = snapV(p.z + d.oz, 5); if (hs.g) hs.g.position.set(hs.x, 0, hs.z); updSelBox(); syncSel(); return; }
+  if (d.k === 'house') { const p = hitY(d.py); if (!p) return; const hs = d.hs; hs.x = snapV(p.x + d.ox, 5); hs.z = snapV(p.z + d.oz, 5); snapHouse(hs); if (hs.g) hs.g.position.set(hs.x, 0, hs.z); d.moved = true; updSelBox(); syncSel(); return; }
   if (d.k === 'multi') {
     const p = hitY(d.py); if (!p) return; let dx = p.x - d.p0[0], dz = p.z - d.p0[1];
     if (PREF.snap && !e.altKey) { dx = Math.round(dx / 5) * 5; dz = Math.round(dz / 5) * 5; }
@@ -1455,6 +1596,7 @@ function endDrag(e) {
   } else if (drag) {
     const d = drag; drag = null; ctl.enabled = true;
     if (d.k === 'rh') remember(d.it);
+    if (d.k === 'house' && d.moved && (R.corridors || []).length) { syncCorrOpenings(R.houses, R.corridors); buildRoom(); }
     if (d.k === 'edge' || d.k === 'vert') { cancelAnimationFrame(rrq); rrq = 0; R.pts = orient(R.pts); normalizeRoom(); reproject(d.refs); roomEdited(); renderRoom(); if (d.k === 'edge' && wasClick) setSel({ k: 'edge', i: d.i }, 'sel'); }
     if (d.k === 'op') renderRoom();
     upd(); renderSel();
@@ -1463,7 +1605,7 @@ function endDrag(e) {
   down = null;
 }
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', () => { drag = null; ctl.enabled = true; down = null; clearTimeout(lpT); marqEl.hidden = true; });
-cv.addEventListener('dblclick', () => { if (sel && sel.k === 'house') return switchSpace(sel.o.sid); focusSel(); });
+cv.addEventListener('dblclick', e => { if (sel && sel.k === 'house') return switchSpace(sel.o.sid); if (siteG.userData.on) { ptr(e); const hit = ray.intersectObject(siteG, true)[0]; const own = pick(); if (hit && hit.object.userData.siteRoom && (!own || own.distance > hit.distance)) return switchSpace(hit.object.userData.siteRoom); } focusSel(); });
 cv.addEventListener('contextmenu', e => { if (isMobile()) e.preventDefault(); });
 
 addEventListener('keydown', e => {
@@ -1809,6 +1951,7 @@ function renderSel() {
   if (isMulti()) { multiPanel(b); app(b, h('div', { id: 'inf', class: 'inf' })); infoSel(); syncSel(); return; }
   if (sel.k === 'item') itemPanel(b, sel.o); else if (sel.k === 'op') opPanel(b, sel.o); else if (sel.k === 'light') lightPanel(b, sel.o); else if (sel.k === 'edge') edgePanel(b, sel.i); else vertPanel(b, sel.i);
   if (isLocked(sel)) { b.querySelectorAll('input,select,textarea,button').forEach(el => { if (!el.closest('.keep')) el.disabled = true; }); b.prepend(h('div', { class: 'lockbar' }, '🔒 잠금 상태 — 위치·크기·모양을 바꿀 수 없습니다', BTN('잠금 해제', () => setLock(sel, 0), 'c'))); }
+  if (sel.k === 'op' || sel.k === 'light') { const k = sel.k === 'light' ? 'pickLight' : sel.o.kind === 'win' ? 'pickWin' : 'pickDoor', nm = { pickWin: '창문', pickDoor: '문', pickLight: '조명' }[k]; app(b, h('div', { class: 'r keep' }, BTN(`🚫 ${nm} 클릭 선택 끄기`, () => { PREF[k] = 0; savePref(); syncTb(); onPref(k); }, 'c', `${nm}이(가) 클릭에 걸려 가구 선택이 불편할 때 — ☰ 메뉴에서 다시 켤 수 있습니다`))); }
   app(b, h('div', { id: 'inf', class: 'inf' })); infoSel(); syncSel();
 }
 function setLock(s, v) { if (!s) return; if (s.k === 'multi') { s.list.forEach(o => { o.lock = v ? 1 : 0; }); selectItems(s.list, s.o); markList(); commitSoon(0); return toast(v ? `🔒 ${s.list.length}개 잠금` : `🔓 ${s.list.length}개 잠금 해제`); } if (s.k === 'edge' || s.k === 'vert') { R.lock = v ? 1 : 0; buildHandles(); renderRoom(); } else s.o.lock = v ? 1 : 0; if (s.k === 'item') setSel(s); else { renderSel(); quick(); } renderRoom(); renderLights(); markList(); commitSoon(0); toast(v ? '🔒 잠갔습니다' : '🔓 잠금을 풀었습니다'); }
@@ -2098,6 +2241,7 @@ function renderRoom() {
     h('h3', {}, '창문·문 추가'),
     G(3, F('창문 종류', wst), F('벽', ws), F(' ', BTN('+ 창문', () => addOp('win', wst.value, +ws.value), 'b'))),
     G(3, F('문 종류', dst), F('벽', ds), F(' ', BTN('+ 문', () => addOp('door', dst.value, +ds.value), 'b'))),
+    h('div', { class: 'cg' }, bchk('창문을 클릭해서 선택 (끄면 클릭이 뒤의 가구로 감)', () => PREF.pickWin, v => { PREF.pickWin = v ? 1 : 0; savePref(); syncTb(); onPref('pickWin'); }), bchk('문을 클릭해서 선택', () => PREF.pickDoor, v => { PREF.pickDoor = v ? 1 : 0; savePref(); syncTb(); onPref('pickDoor'); })),
     h('h3', {}, `창호 목록 (${OPS.length})`),
     OPS.length ? h('div', { class: 'r' }, BTN('🔒 창호 모두 잠금', () => { OPS.forEach(o => { o.lock = 1; }); renderRoom(); renderSel(); quick(); commitSoon(0); toast('창문·문을 모두 잠갔습니다'); }, 'c'), BTN('🔓 모두 해제', () => { OPS.forEach(o => { o.lock = 0; }); renderRoom(); renderSel(); quick(); commitSoon(0); }, 'c')) : null,
     h('div', {}, OPS.length ? OPS.map(o => {
@@ -2118,6 +2262,8 @@ function outdoorPanel(b, rect) {
   const D0 = ENV_DEF[R.env] || ENV_DEF.field, RB = () => { buildRoom(); commitSoon(); };
   app(b,
     h('h3', {}, '🏠 집·방 배치'), housesBlock(),
+    (R.houses || []).length ? h('div', { class: 'r' }, BTN('지붕 모두 없애기 (방 안이 보이게)', () => { R.houses.forEach(x => { x.roof = 'none'; }); buildRoom(); upd(); }, 'c'), BTN('지붕 모두 평지붕', () => { R.houses.forEach(x => { x.roof = 'flat'; }); buildRoom(); upd(); }, 'c')) : null,
+    h('h3', {}, '🔗 공간 연결 (붙이기·통로)'), corridorBlock(),
     h('h3', {}, '야외 환경'),
     h('div', { class: 'ch' }, ENVS.map(([k, n]) => BTN(n, () => { R.env = k; R.gk = ENV_DEF[k].g; R.gc = ENV_DEF[k].gc; RB(); renderRoom(); }, 'c' + (R.env === k ? ' on' : '')))),
     G(2, F('지면', bsel(GROUNDS, () => R.gk || D0.g, v => { R.gk = v; RB(); })), F('지면 색', bcol(() => R.gc || D0.gc, v => { R.gc = v; buildRoom(); }))),
@@ -2307,12 +2453,12 @@ function importJSON(t, fn) {
 }
 
 // ---------- 툴바 ----------
-const TBK = [['snap', '스냅·벽/가구 붙이기'], ['handles', '벽 이동 핸들'], ['shapeEdit', '방 모양 편집 (꼭짓점)'], ['labels', '라벨 (책장1 등)'], ['ceil', '천장 표시'], ['vdoor', '문 표시'], ['vwin', '창문 표시'], ['stack', '소품 위에 올리기'], ['touchSafe', '터치: 선택 후 이동']];
+const TBK = [['pickWin', '창문 클릭해서 선택'], ['pickDoor', '문 클릭해서 선택'], ['pickLight', '조명 클릭해서 선택'], ['site', '옆 공간·야외 배경 함께 보기'], ['snap', '스냅·벽/가구 붙이기'], ['handles', '벽 이동 핸들'], ['shapeEdit', '방 모양 편집 (꼭짓점)'], ['labels', '라벨 (책장1 등)'], ['ceil', '천장 표시'], ['vdoor', '문 표시'], ['vwin', '창문 표시'], ['stack', '소품 위에 올리기'], ['touchSafe', '터치: 선택 후 이동']];
 $('spcPill').onclick = () => spaceMenu();
 function spaceMenu() {
   const body = h('div', {});
   app(body, h('div', { class: 'spl' }, SPACES.map(sp => h('button', { class: 'it' + (sp.id === SPID ? ' s' : ''), type: 'button', onclick: () => { m.close(); switchSpace(sp.id); } }, h('span', {}, (sp.kind === 'out' ? '🌳 ' : '🏠 ') + sp.name), sp.id === SPID ? h('small', {}, '현재') : null))),
-    h('div', { class: 'r' }, BTN('＋ 방 추가', () => { m.close(); addSpaceDlg('room'); }, 'b'), BTN('＋ 야외 추가', () => { m.close(); addSpaceDlg('out'); }, 'b'), BTN('📷 사진·도면으로', () => { m.close(); AI.openPhoto('room'); }, 'o')),
+    h('div', { class: 'r' }, BTN('🏘 모든 공간 함께 보기', () => { m.close(); goOverview(); }, 'b'), BTN('＋ 방 추가', () => { m.close(); addSpaceDlg('room'); }, 'b'), BTN('＋ 야외 추가', () => { m.close(); addSpaceDlg('out'); }, 'b'), BTN('📷 사진·도면으로', () => { m.close(); AI.openPhoto('room'); }, 'o')),
     h('div', { class: 'r' }, BTN('공간 설정 열기', () => { m.close(); showTab('room'); if (mq.matches) setSheet('half'); }, 'c')));
   const m = mdl('공간 — ' + projName, body);
 }
@@ -2331,6 +2477,8 @@ function syncTb() { document.querySelectorAll('#ddm input').forEach(i => { i.che
 function onPref(k) {
   if (k === 'handles' || k === 'shapeEdit') buildHandles(); else if (k === 'labels') items.forEach(mk); else if (k === 'ceil') roomG.children.forEach(c => { if (c.userData.ceil) c.visible = !!PREF.ceil; });
   else if (k === 'vdoor' || k === 'vwin') applyVis();
+  else if (k === 'site') { buildSiteView(); applyLightMode(); }
+  else if (/^pick/.test(k)) { if (!PREF[k] && sel && ((k === 'pickWin' && sel.k === 'op' && sel.o.kind === 'win') || (k === 'pickDoor' && sel.k === 'op' && sel.o.kind === 'door') || (k === 'pickLight' && sel.k === 'light'))) setSel(null); renderRoom(); toast(PREF[k] ? `${({ pickWin: '창문', pickDoor: '문', pickLight: '조명' })[k]}을(를) 다시 클릭해서 선택할 수 있습니다` : `${({ pickWin: '창문', pickDoor: '문', pickLight: '조명' })[k]}은(는) 클릭해도 선택되지 않습니다 — 뒤에 있는 가구가 선택됩니다 (목록에서는 선택 가능)`, 4000); }
   syncSel();
 }
 function closeMenus() { document.querySelectorAll('details.menu[open]').forEach(d => { d.open = false; }); }
@@ -2442,6 +2590,7 @@ function runActions(actions = []) {
         addSpace(a.name || (kind === 'out' ? '야외' : '방'), st); log.push(`＋ 공간 '${a.name || ''}' 추가 (${kind === 'out' ? '야외' : '방'})`);
         if (kind === 'out' && a.house !== false && roomsNow.length) { placeHouses(roomsNow); log.push(`🏠 집(방 ${roomsNow.length}개)을 야외에 배치`); }
       }
+      else if (op === 'overview') { goOverview(); log.push('🏘 모든 공간 함께 보기'); }
       else if (op === 'switchSpace') { const sp = SPACES.find(x => x.name === a.name || x.id === a.id); if (sp) { switchSpace(sp.id); log.push(`→ '${sp.name}'(으)로 이동`); } else log.push(`⚠ 공간 '${a.name}' 없음`); }
       else if (op === 'night') { setNight(a.value ? 1 : 0); log.push(a.value ? '🌙 야간 모드' : '☀ 주간 모드'); }
       else if (op === 'view') { view(a.value || 'iso'); }
