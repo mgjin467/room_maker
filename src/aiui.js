@@ -381,7 +381,15 @@ ${sceneText(viewKey)}`;
     const VIEWS = [['cur', '현재 화면'], ['door', '입구 시점'], ['iso', '대각선 (오른쪽)'], ['isoL', '대각선 (왼쪽)'], ['top', '위에서'], ...Array.from({ length: nCorner }, (_, i) => [`eye${i}`, `눈높이 · 모서리 ${i + 1}`]), ['sel', '선택 대상 클로즈업']];
     const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high', useRefs: true, extraRefs: [], guide: true, faces: true, noPeople: false };
     const nRefs = () => (A.R.refs || []).length + A.items.reduce((n, i) => n + (i.refUse === 0 ? 0 : (i.refs || []).length), 0);
-    const xfi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }); xfi.onchange = async () => { for (const f of xfi.files) st.extraRefs.push(await fileToDataURL(f, 1000, 0.85)); xfi.value = ''; draw(); };
+    const xfi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }); xfi.onchange = async () => { const ppl = A.items.filter(x => x.type === 'person'); for (const f of xfi.files) st.extraRefs.push({ src: await fileToDataURL(f, 1200, 0.86), use: ppl.length === 1 ? 'p:' + ppl[0].id : 'style', aspect: 'face', note: '' }); xfi.value = ''; draw(); };
+    const ASPECTS = [['face', '얼굴'], ['facehair', '얼굴+헤어'], ['outfit', '옷차림'], ['look', '전체 모습 (얼굴·헤어·옷)']], ASP_EN = { face: 'FACE (facial features, skin tone)', facehair: 'FACE and HAIRSTYLE', outfit: 'CLOTHING (garments, fabric, colors)', look: 'FACE, HAIRSTYLE and CLOTHING' };
+    const xrRow = (x, i) => { const ppl = A.items.filter(q => q.type === 'person');
+      const us = h('select', {}, h('option', { value: 'style' }, '공간 분위기·스타일 참고'), ppl.map(q => h('option', { value: 'p:' + q.id }, `→ ${A.itemLabel(q)} ${q.name}`))); us.value = x.use; us.onchange = () => { x.use = us.value; draw(); };
+      const as = h('select', {}, ASPECTS.map(([k, n]) => h('option', { value: k }, n))); as.value = x.aspect; as.onchange = () => { x.aspect = as.value; };
+      const nt = h('input', { type: 'text', value: x.note, placeholder: '사진 속 어느 사람? 예: 왼쪽에서 3번째 서 있는 남자' }); nt.oninput = () => { x.note = nt.value; };
+      const tgt = x.use.startsWith('p:') ? A.items.find(q => 'p:' + q.id === x.use) : null;
+      return h('div', { class: 'xrr' }, h('img', { src: x.src }), h('div', { class: 'xrf' }, us, tgt ? as : null, tgt ? nt : null,
+        h('div', { class: 'r' }, tgt ? BTN(`📌 ${A.itemLabel(tgt)}에 계속 붙여 두기`, async () => { const id = await putRef(x.src); tgt.refs = [...(tgt.refs || []), { id, kind: x.aspect === 'outfit' ? 'outfit' : x.aspect === 'look' ? 'look' : 'face', note: x.note || undefined }]; A.commit(); st.extraRefs.splice(i, 1); toast(`📎 ${A.itemLabel(tgt)}에 참고 사진을 붙였습니다 — 다음 렌더부터 자동으로 반영됩니다`, 5000); draw(); }, 'c') : null, BTN('빼기', () => { st.extraRefs.splice(i, 1); draw(); }, 'c')))); };
     const body = h('div', {}), res = h('div', { class: 'rgrid' });
     const draw = () => {
       body.innerHTML = '';
@@ -400,9 +408,9 @@ ${sceneText(viewKey)}`;
             A.items.some(x => x.type === 'person') ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.faces, onchange: e => { st.faces = e.target.checked; } }), '👤 사람 얼굴 사진도 실사에 반영 (안전 필터에 자주 걸리면 끄세요)') : null,
             A.items.some(x => x.type === 'person') ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.noPeople, onchange: e => { st.noPeople = e.target.checked; } }), '사람 빼고 공간만 실사로') : null,
             h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.guide, onchange: e => { st.guide = e.target.checked; } }), '🧭 구조 고정 (창·문·가구 위치·크기 가이드를 함께 보내 왜곡 방지 — 권장)'),
-            h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.useRefs, onchange: e => { st.useRefs = e.target.checked; } }), `📎 가구·사람·공간에 붙인 참고 사진 반영 (${nRefs()}장)`)),
+            h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.useRefs, onchange: e => { st.useRefs = e.target.checked; } }), `📎 선택 탭에서 가구·사람·공간에 붙여 둔 참고 사진 반영 (${nRefs()}장)${st.extraRefs.length ? ` · 이번 렌더용 ${st.extraRefs.length}장은 아래에서 따로 지정` : ''}`)),
           h('div', { class: 'r' }, BTN('📎 이번 렌더용 참고 사진 추가', () => xfi.click(), 'c'), xfi, st.extraRefs.length ? BTN(`참고 ${st.extraRefs.length}장 지우기`, () => { st.extraRefs = []; draw(); }, 'c') : null),
-          st.extraRefs.length ? h('div', { class: 'attrow' }, st.extraRefs.map(s => h('span', { class: 'att' }, h('img', { src: s })))) : null,
+          st.extraRefs.length ? h('div', { class: 'xrl' }, st.extraRefs.map(xrRow)) : null,
           h('p', { class: 'mu sm' }, '참고 사진: 얼굴·옷·체형·자세(사람), 재질·모양(가구), 분위기(공간)를 실사 이미지에 맞춰 반영합니다. 선택 탭의 「📎 참고 사진」에서 객체마다 붙일 수 있습니다.'),
           F('이미지 모델', modelPicker('image', draw)),
           h('p', { class: 'mu sm' }, `${PROVIDERS[im.provider]?.name} · ${im.model}${im.key ? '' : ' — ⚠ 키 없음 (⚙ AI 설정)'} · 배치·크기·재질·조명 설정이 프롬프트에 그대로 들어갑니다.`)) : null,
@@ -424,8 +432,9 @@ ${sceneText(viewKey)}`;
           if (st.ai) {
             card.querySelector('small').textContent = `${name} · AI 생성 중… (20~90초)`;
             const cw = Math.round(W * sc), ch = Math.round(H * sc), guide = st.guide ? A.captureGuide(vk, cw, ch) : null, lay = st.guide ? A.layoutText(vk, cw, ch) : '';
-            const start = guide ? 3 : 2, rr = st.useRefs ? await collectRenderRefs(st.extraRefs.length ? 6 : 9, start) : { imgs: [], text: '' }, xr = st.extraRefs.slice(0, 4), x0 = start + rr.imgs.length;
-            const xt = xr.length ? ` Additional style reference image${xr.length > 1 ? 's' : ''} #${x0}${xr.length > 1 ? '–#' + (x0 + xr.length - 1) : ''}: match their overall style, lighting and materials only (never their layout).` : '';
+            const start = guide ? 3 : 2, rr = st.useRefs ? await collectRenderRefs(st.extraRefs.length ? 6 : 9, start) : { imgs: [], text: '' }, xo = st.extraRefs.slice(0, 4), xr = xo.map(x => x.src), x0 = start + rr.imgs.length;
+            const xt = xo.length ? '\n' + xo.map((x, k) => { const n = x0 + k, tgt = x.use.startsWith('p:') ? A.items.find(q => 'p:' + q.id === x.use) : null; return tgt ? `Reference image #${n} → ${A.itemLabel(tgt)} (${personEN(tgt)}): give this person the ${ASP_EN[x.aspect] || ASP_EN.face} of ${x.note ? `"${x.note}"` : 'the person'} in that photo, as faithfully as possible. Keep ${A.itemLabel(tgt)}'s position, size and current pose exactly as in image #1 (do not copy the photo's pose, background or other people).` : `Reference image #${n}: match its overall style, lighting and materials only (never its layout or people).`; }).join(' ') + (st.extra ? ` User's note about these references: ${st.extra}` : '') : '';
+            const xrSafe = xo.filter(x => !x.use.startsWith('p:')).map(x => x.src);
             const gt = guide ? `\nSTRUCTURE GUIDE: image #2 is a flat-color map rendered from EXACTLY the same camera as image #1 (it is not a style reference): gray = walls/floor/ceiling, BLUE = window frames, light blue = window glass, ORANGE = door frames/panels, light orange = door glass, yellow = light fixtures, each furniture piece = its own flat color listed below. Use it only to lock geometry: every window, door, wall edge and object in your photo must cover the same pixel region as in the guide. Never enlarge, shrink or move a window; never move a door to a different wall; never mirror the scene; whatever is nearest to the camera in image #1 stays nearest.\nEXACT OPENINGS & OBJECTS FROM THE 3D MODEL:\n${lay}` : '';
             const prompt = renderPrompt(vk, st) + gt + rr.text + xt;
             card._prompt = prompt;
@@ -435,12 +444,13 @@ ${sceneText(viewKey)}`;
             // 1) 그대로 → 2) 사람이 있으면: 얼굴 사진·사람 참고 사진 빼고 다시 캡처 + 사람 묘사 단순화 → 3) 사람 없이 → 4) 다른 이미지 AI(키가 쓸 수 있을 때만)
             const hideFaces = fn => { const hid = []; people.forEach(x => x.g && x.g.traverse(o => { if (o.userData.faceTex && o.visible) { o.visible = false; hid.push(o); } })); try { return fn(); } finally { hid.forEach(o => { o.visible = true; }); } };
             const hasFace = people.some(x => x.face);
-            const plainPrompt = prompt.replace(/People:[^\n]*/g, '') + `\nPeople in the scene are ordinary, generic, non-identifiable adults in everyday clothes (${people.map(x => personEN(x, true)).join('; ')}). Do not depict any real or identifiable person.`;
+            const styleTxt = xrSafe.length ? ` Style reference image${xrSafe.length > 1 ? 's' : ''} #${start}${xrSafe.length > 1 ? '–#' + (start + xrSafe.length - 1) : ''}: match overall style, lighting and materials only (never layout or people).` : '';
+            const plainPrompt = renderPrompt(vk, st) + gt + styleTxt + `\nPeople in the scene are ordinary, generic, non-identifiable adults in everyday clothes (${people.map(x => personEN(x, true)).join('; ')}). Do not depict any real or identifiable person.`;
             let tries = [{ n: '기본', im, prompt, image: cap, refs: [...(guide ? [guide] : []), ...rr.imgs, ...xr] }];
-            if (people.length) tries.push({ n: hasFace ? '얼굴 사진 빼고' : '사람 묘사 단순화', im, prompt: plainPrompt, recap: 'faces', refs0: [...rr.imgs.filter(x => !peopleRefs.has(x)), ...xr] });
+            if (people.length) tries.push({ n: hasFace ? '얼굴 사진 빼고' : '사람 묘사 단순화', im, prompt: plainPrompt, recap: 'faces', refs0: [...xrSafe] });
             if (people.length) tries.push({ n: '사람 제외', im, noPeople: true });
             const other = ['gemini', 'openai'].filter(p => p !== im.provider).map(p => ({ provider: p, model: (PROVIDERS[p].image[0] || [])[0], key: keyOf(p) })).find(x => x.key && x.model);
-            if (other) tries.push({ n: (PROVIDERS[other.provider] || {}).name + '로', im: other, prompt: people.length ? plainPrompt : prompt, recap: people.length ? 'faces' : null, refs0: [...rr.imgs.filter(x => !peopleRefs.has(x)), ...xr], soft: true });
+            if (other) tries.push({ n: (PROVIDERS[other.provider] || {}).name + '로', im: other, prompt: people.length ? plainPrompt : prompt, recap: people.length ? 'faces' : null, refs0: people.length ? [...xrSafe] : [...rr.imgs, ...xr], soft: true });
             if (people.length && st.noPeople) tries = tries.filter(t => t.noPeople || t.soft); else if (people.length && !st.faces) tries = tries.slice(1);
             let gen = null, lastErr = null, used = null; const notes = [];
             for (let ti = 0; ti < tries.length; ti++) {

@@ -332,3 +332,7 @@ body.mob .rsz span{width:64px;height:6px}
 .keyta{width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;resize:vertical;min-height:38px}
 .keyta.mask{-webkit-text-security:disc;text-security:disc}
 .tres{display:flex;flex-direction:column;gap:3px;margin-top:4px;font-size:12px}.tres .ok{color:#2b9348}
+.xrl{display:flex;flex-direction:column;gap:8px;margin:6px 0}
+.xrr{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--bd);border-radius:10px;padding:6px;background:var(--bg)}
+.xrr img{width:92px;height:92px;object-fit:cover;border-radius:8px;flex:none}
+.xrf{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}.xrf select,.xrf input{width:100%;box-sizing:border-box}
