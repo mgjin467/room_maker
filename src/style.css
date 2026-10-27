@@ -329,3 +329,6 @@ body.mob .rsz span{width:64px;height:6px}
 .note .nx{flex:none;background:none;border:0;color:var(--mu);font-size:18px;line-height:1;cursor:pointer;padding:0 4px}
 .note.out{opacity:0;transform:translateY(-6px);transition:all .2s}
 @keyframes nin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.keyta{width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;resize:vertical;min-height:38px}
+.keyta.mask{-webkit-text-security:disc;text-security:disc}
+.tres{display:flex;flex-direction:column;gap:3px;margin-top:4px;font-size:12px}.tres .ok{color:#2b9348}

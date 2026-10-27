@@ -98,6 +98,7 @@ function rsz() {
 new ResizeObserver(rsz).observe(wrap);
 const roomG = new THREE.Group(), opG = new THREE.Group(), ltG = new THREE.Group(), fG = new THREE.Group(), dimG = new THREE.Group(), hdG = new THREE.Group();
 scene.add(roomG, opG, ltG, fG, dimG, hdG);
+let RG = roomG, OG = opG; const houseG = new THREE.Group(); scene.add(houseG);
 // ---------- 공간: 한 프로젝트 안의 여러 방·야외 ----------
 // SPACES = [{ id, name, kind:'room'|'out', s: 저장된 상태(현재 공간은 s 없음) }]
 let SPACES = [{ id: 's1', name: '방 1', kind: 'room' }], SPID = 's1';
@@ -131,7 +132,8 @@ function deleteSpace(id) {
 }
 function addSpaceDlg(kind) {
   const body = h('div', {}), nm = h('input', { type: 'text', value: uniqSpace(kind === 'out' ? '야외' : '방') });
-  let env = 'field', pre = 0;
+  let env = 'field', pre = 0; const roomsNow = SPACES.filter(x => x.kind !== 'out');
+  const hsel = h('select', {}, h('option', { value: 'all' }, `전체 집 (방 ${roomsNow.length}개)`), ...roomsNow.map(sp => h('option', { value: sp.id }, sp.name + '만')), h('option', { value: '' }, '배치 안 함 (빈 야외)')); if (!roomsNow.length) hsel.value = '';
   const envBox = h('div', { class: 'ch' }), preBox = h('div', { class: 'ch' });
   const draw = () => {
     envBox.innerHTML = ''; preBox.innerHTML = '';
@@ -140,10 +142,12 @@ function addSpaceDlg(kind) {
   };
   draw();
   app(body, F('이름', nm), kind === 'out' ? h('h4', {}, '환경') : null, kind === 'out' ? envBox : null, h('h4', {}, '크기'), preBox,
+    kind === 'out' && roomsNow.length ? F('🏠 야외에 집(방) 배치', hsel) : null,
     h('div', { class: 'r' }, BTN('만들기', () => {
       const p = (kind === 'out' ? OUT_PRE : ROOM_PRE)[pre];
       const st = kind === 'out' ? outdoorState(env, p[1], p[2]) : p[1] ? roomState(p[1], p[2], p[3]) : roomState(R.W, R.D, R.kind === 'out' ? 230 : R.H);
       m.close(); addSpace(nm.value, st);
+      if (kind === 'out' && hsel.value) placeHouses(hsel.value === 'all' ? roomsNow.map(x => x.id) : [hsel.value]);
     }, 'b'), BTN('취소', () => m.close())),
     h('p', { class: 'mu sm' }, '사진·도면으로 만들려면 AI 탭 → 「방·도면 사진 인식」 또는 아래의 「📷 사진·도면으로 공간 만들기」를 쓰세요.'));
   const m = mdl(kind === 'out' ? '🌳 야외 공간 추가' : '🏠 방 추가', body);
@@ -156,6 +160,68 @@ function spaceBlock() {
 }
 function renderSpacePill() { const el = $('spcPill'); if (!el) return; const sp = SPACES.find(x => x.id === SPID) || {}; el.textContent = (spKind(R) === 'out' ? '🌳 ' : '🏠 ') + (sp.name || '공간') + (SPACES.length > 1 ? ` (${SPACES.length})` : '') + ' ▾'; const mb = $('ddspc'); if (mb) mb.textContent = '🏠 공간: ' + (sp.name || '') + ' (바꾸기·추가)'; }
 // 야외 지면·풍경
+// ---------- 야외 안의 집: 이 프로젝트의 방(들)을 건물로 배치 ----------
+// R.houses = [{ id, sid(방 공간 id), x, z(배치 영역 안 중심), rot, roof:'flat'|'gable'|'none', lock }]
+const ROOFS = [['flat', '평지붕'], ['gable', '박공지붕 (ㅅ자)'], ['none', '지붕 없음 (안이 보이게)']];
+function roomBBox(st) { const r = normState(st).R, b = bbox(outline(edgesOf(r.pts, r.bul || {}))); return { W: b.W, D: b.D, H: r.H || 230 }; }
+function buildHouseModel(st, roof) {
+  const body = new THREE.Group(), sv = { R, E, OL, BB, OPS, items };
+  let info;
+  try {
+    const s2 = normState(st); R = s2.R; R.wcs = { ...(R.wcs || {}) }; R.bul = { ...(R.bul || {}) }; geo();
+    OPS = (s2.ops || []).map(o => ({ ...o })); items = (s2.items || []).map(normItem);
+    RG = body; OG = body; buildRoomBody();
+    items.forEach(it => { mk(it); fit(it, false); fG.remove(it.g); body.add(it.g); if (it.g.userData.e) it.g.userData.e.visible = false; });
+    info = { BB: { ...BB }, H: R.H, OL: OL.map(p => [...p]), rect: isRect(R.pts, R.bul), wc: R.wc };
+  } finally { R = sv.R; E = sv.E; OL = sv.OL; BB = sv.BB; OPS = sv.OPS; items = sv.items; RG = roomG; OG = opG; geo(); }
+  body.traverse(o => { if (o.userData.ceil) o.visible = roof !== 'none'; if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.side = THREE.DoubleSide; }); });
+  // 지붕
+  const { BB: b, H } = info, rm = new THREE.MeshLambertMaterial({ color: 0x6b6f75, side: THREE.DoubleSide });
+  if (roof === 'flat' || (roof === 'gable' && !info.rect)) { const sh = new THREE.Shape(info.OL.map(([x, z]) => new THREE.Vector2(x, -z))), m = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 18, bevelEnabled: false }), new THREE.MeshLambertMaterial({ color: 0xb9b5ad })); m.rotation.x = -PI / 2; m.position.y = H + 2; body.add(m); }
+  else if (roof === 'gable') { const ov = 30, rise = Math.min(b.D, b.W) * 0.3, half = b.D / 2 + ov, sl = Math.hypot(half, rise), ang = Math.atan2(rise, half); [1, -1].forEach(k => { const m = new THREE.Mesh(new THREE.BoxGeometry(b.W + ov * 2, 8, sl), rm); m.position.set(b.x0 + b.W / 2, H + rise / 2 + 4, b.z0 + b.D / 2 + k * half / 2); m.rotation.x = k * ang; body.add(m); }); [b.x0 - 1, b.x1 + 1].forEach(x => { const sh = new THREE.Shape([new THREE.Vector2(-b.D / 2, 0), new THREE.Vector2(b.D / 2, 0), new THREE.Vector2(0, rise)]), m = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshLambertMaterial({ color: new THREE.Color(info.wc || '#f0ede6').getHex(), side: THREE.DoubleSide })); m.rotation.y = PI / 2; m.position.set(x, H, b.z0 + b.D / 2); body.add(m); }); }
+  // 건물 바닥 기단
+  const base = new THREE.Mesh(new THREE.BoxGeometry(b.W + 24, 12, b.D + 24), new THREE.MeshLambertMaterial({ color: 0xa8a39a })); base.position.set(b.x0 + b.W / 2, -6, b.z0 + b.D / 2); body.add(base);
+  body.position.set(-(b.x0 + b.W / 2), 0, -(b.z0 + b.D / 2)); // 집 중심이 원점
+  return { body, W: b.W, D: b.D, H };
+}
+const TV = (o, k, v) => Object.defineProperty(o, k, { value: v, writable: true, configurable: true, enumerable: false }); // 저장에서 빠지는 임시 값
+function buildHouses() {
+  disposeTree(houseG); houseG.clear();
+  if (R.kind !== 'out') return;
+  (R.houses || []).forEach(hs => {
+    const sp = SPACES.find(x => x.id === hs.sid); if (!sp || !sp.s || spKind(sp.s.R) === 'out') { TV(hs, 'g', null); return; }
+    const m = buildHouseModel(sp.s, hs.roof || 'flat'), g = new THREE.Group(); g.add(m.body); TV(hs, '_w', m.W); TV(hs, '_d', m.D); TV(hs, '_h', m.H); TV(hs, '_name', sp.name);
+    g.position.set(hs.x, 0, hs.z); g.rotation.y = (hs.rot || 0) * PI / 180; g.traverse(o => { o.userData.house = hs; });
+    TV(hs, 'g', g); houseG.add(g);
+  });
+}
+function placeHouses(sids) {
+  if (R.kind !== 'out') return toast('야외 공간에서만 집을 배치할 수 있습니다');
+  const list = sids.map(id => SPACES.find(x => x.id === id)).filter(sp => sp && sp.s && spKind(sp.s.R) !== 'out'); if (!list.length) return toast('배치할 방이 없습니다 — 먼저 「＋ 방 추가」로 방을 만드세요');
+  const dims = list.map(sp => roomBBox(sp.s)), gap = 0, Wt = dims.reduce((a, d) => a + d.W, 0) + gap * (dims.length - 1), Dt = Math.max(...dims.map(d => d.D));
+  if (Wt + 600 > R.W || Dt + 900 > R.D) setRoomDim('W', Math.max(R.W, Wt + 600)), setRoomDim('D', Math.max(R.D, Dt + 900));
+  let x = BB.x0 + (BB.W - Wt) / 2; const z = BB.z0 + 250 + Dt / 2;
+  R.houses = [...(R.houses || [])];
+  list.forEach((sp, i) => { R.houses.push({ id: 'h' + Date.now().toString(36) + i, sid: sp.id, x: r1(x + dims[i].W / 2), z: r1(z - (Dt - dims[i].D) / 2), rot: 0, roof: 'flat' }); x += dims[i].W + gap; });
+  buildRoom(); upd(); renderRoom(); toast(`🏠 ${list.map(s => s.name).join(', ')} — 집을 야외에 배치했습니다 (끌어서 이동, 더블클릭하면 그 방으로 들어갑니다)`, 6000);
+}
+function removeHouse(hs) { R.houses = (R.houses || []).filter(x => x !== hs); if (sel && sel.o === hs) setSel(null); buildRoom(); upd(); renderRoom(); }
+function housePanel(b, hs) {
+  const RB = () => { buildRoom(); updSelBox(); commitSoon(); syncSel(); };
+  app(b, h('div', { class: 'lab' }, `🏠 ${hs._name || '집'}`),
+    h('p', { class: 'mu sm' }, `건물 크기 ${rd(hs._w || 0)} × ${rd(hs._d || 0)} cm · 높이 ${rd(hs._h || 0)} cm — 이 프로젝트의 방 공간을 그대로 보여 줍니다. 방 안을 고치면 여기에도 반영됩니다.`),
+    G(3, F('왼쪽에서 (중심)', bnum(() => hs.x - BB.x0, v => { hs.x = BB.x0 + v; if (hs.g) hs.g.position.x = hs.x; updSelBox(); commitSoon(); })), F('뒤에서 (중심)', bnum(() => hs.z - BB.z0, v => { hs.z = BB.z0 + v; if (hs.g) hs.g.position.z = hs.z; updSelBox(); commitSoon(); })), F('각도 (시계°)', bnum(() => norm360(-(hs.rot || 0)), v => { hs.rot = norm360(-v); if (hs.g) hs.g.rotation.y = hs.rot * PI / 180; updSelBox(); commitSoon(); }, { step: 15 }))),
+    h('div', { class: 'r' }, BTN('⟲ 90°', () => rotSel(90), 'c'), BTN('⟳ 90°', () => rotSel(-90), 'c'), BTN('⟳ 180°', () => rotSel(180), 'c'), BTN('가운데로', () => { hs.x = BB.x0 + BB.W / 2; hs.z = BB.z0 + BB.D / 2; RB(); }, 'c')),
+    F('지붕', bsel(ROOFS, () => hs.roof || 'flat', v => { hs.roof = v; RB(); })),
+    h('div', { class: 'r' }, BTN('🚪 이 방으로 들어가기', () => switchSpace(hs.sid), 'b'), BTN('야외에서 빼기', () => removeHouse(hs), 'o danger')));
+}
+function housesBlock() {
+  const rooms = SPACES.filter(sp => sp.id !== SPID && sp.kind !== 'out'), placed = new Set((R.houses || []).map(x => x.sid));
+  return h('div', { class: 'spbox' },
+    (R.houses || []).length ? h('div', { class: 'ch' }, R.houses.map(hs => BTN(`🏠 ${(SPACES.find(x => x.id === hs.sid) || {}).name || '(삭제된 방)'}`, () => { if (hs.g) setSel({ k: 'house', o: hs }, 'sel'); }, 'c' + (sel && sel.o === hs ? ' on' : '')))) : h('p', { class: 'mu sm' }, '아직 배치된 집이 없습니다.'),
+    rooms.length ? h('div', { class: 'r' }, rooms.length > 1 ? BTN(`＋ 전체 집 배치 (방 ${rooms.length}개)`, () => placeHouses(rooms.filter(r => !placed.has(r.id)).map(r => r.id)), 'b') : null, ...rooms.map(sp => BTN(`＋ ${sp.name}${placed.has(sp.id) ? ' (하나 더)' : ''}`, () => placeHouses([sp.id]), rooms.length > 1 ? 'c' : 'b'))) : h('p', { class: 'mu sm' }, '이 프로젝트에 방 공간이 없습니다. 「＋ 방 추가」로 방을 만들면 여기에 집으로 배치할 수 있어요.'),
+    h('p', { class: 'mu sm' }, '집을 끌어서 옮기고, 선택 탭에서 회전·지붕을 바꿀 수 있습니다. 집을 더블클릭하면 그 방 안으로 들어갑니다.'));
+}
 const envG = new THREE.Group(); scene.add(envG);
 function buildOutdoor() {
   const D0 = ENV_DEF[R.env] || ENV_DEF.field, gk = R.gk || D0.g, gc = R.gc || D0.gc, t = vtimeNow(); R.vtimeNow = t;
@@ -165,6 +231,7 @@ function buildOutdoor() {
   const pts = OL.map(([x, z]) => new THREE.Vector3(x, 0.6, z)); pts.push(pts[0].clone());
   const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 30, gapSize: 18, transparent: true, opacity: 0.85 })); ln.computeLineDistances(); roomG.add(ln);
   envG.add(buildEnv(R, BB, t));
+  buildHouses();
 }
 
 const selBox = new THREE.BoxHelper(undefined, 0x2f6fed); selBox.visible = false; selBox.material.depthTest = false; selBox.renderOrder = 20; scene.add(selBox);
@@ -190,7 +257,7 @@ function numberAll() { items.forEach(i => ensureNo(i, items, x => grp(x.type)));
 const LOCKMSG = { item: '잠긴 가구입니다', op: '잠긴 창호입니다', light: '잠긴 조명입니다', room: '방 모양이 잠겨 있습니다' };
 const isLocked = s => !!(s && (s.k === 'multi' ? s.list.every(o => o.lock) : s.k === 'edge' || s.k === 'vert' ? R.lock : s.o && s.o.lock));
 function lockGuard(s) { if (isLocked(s)) { toast('🔒 ' + (LOCKMSG[s.k] || LOCKMSG.room) + ' — 잠금을 풀면 수정할 수 있습니다'); return true; } return false; }
-const labelOf = s => !s ? '' : s.k === 'item' ? itemLabel(s.o) : s.k === 'op' ? opLabel(s.o) : s.k === 'light' ? lightLabel(s.o) : s.k === 'edge' ? '벽' + (s.i + 1) : '꼭짓점' + (s.i + 1);
+const labelOf = s => !s ? '' : s.k === 'house' ? '🏠 ' + (s.o._name || '집') : s.k === 'item' ? itemLabel(s.o) : s.k === 'op' ? opLabel(s.o) : s.k === 'light' ? lightLabel(s.o) : s.k === 'edge' ? '벽' + (s.i + 1) : '꼭짓점' + (s.i + 1);
 
 // ---------- 바닥 텍스처 ----------
 const TX = {};
@@ -264,25 +331,32 @@ function vtimeNow() { return R.vtime && R.vtime !== 'auto' ? R.vtime : PREF.nigh
 function addSeg(p, q, H, mtl, bbm, holes) {
   const dx = q[0] - p[0], dz = q[1] - p[1], len = Math.hypot(dx, dz); if (len < 0.3) return;
   const u = [dx / len, dz / len], n = [-u[1], u[0]], ry = Math.atan2(-u[1], u[0]), at = s => [p[0] + u[0] * s, p[1] + u[1] * s];
-  wallRects(len, H, holes).forEach(([a, b, y0, y1]) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(b - a, y1 - y0), mtl), [x, z] = at((a + b) / 2); m.position.set(x, (y0 + y1) / 2, z); m.rotation.y = ry; roomG.add(m); });
-  freeIntervals(len, holes.filter(h => h[2] < 2)).forEach(([a, b]) => { if (b - a < 1) return; const m = new THREE.Mesh(new THREE.BoxGeometry(b - a, 8, 1.2), bbm), [x, z] = at((a + b) / 2); m.position.set(x + n[0] * 0.6, 4, z + n[1] * 0.6); m.rotation.y = ry; roomG.add(m); });
+  wallRects(len, H, holes).forEach(([a, b, y0, y1]) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(b - a, y1 - y0), mtl), [x, z] = at((a + b) / 2); m.position.set(x, (y0 + y1) / 2, z); m.rotation.y = ry; RG.add(m); });
+  freeIntervals(len, holes.filter(h => h[2] < 2)).forEach(([a, b]) => { if (b - a < 1) return; const m = new THREE.Mesh(new THREE.BoxGeometry(b - a, 8, 1.2), bbm), [x, z] = at((a + b) / 2); m.position.set(x + n[0] * 0.6, 4, z + n[1] * 0.6); m.rotation.y = ry; RG.add(m); });
   const cap = new THREE.Mesh(new THREE.BoxGeometry(len + 1, 2, 12), new THREE.MeshLambertMaterial({ color: 0xcfc9be })), [cx, cz] = at(len / 2);
-  cap.position.set(cx - n[0] * 6, H + 1, cz - n[1] * 6); cap.rotation.y = ry; roomG.add(cap);
+  cap.position.set(cx - n[0] * 6, H + 1, cz - n[1] * 6); cap.rotation.y = ry; RG.add(cap);
 }
 function buildRoom() {
-  geo(); disposeTree(roomG); roomG.clear(); disposeTree(opG); opG.clear(); disposeTree(envG); envG.clear();
+  geo(); disposeTree(roomG); roomG.clear(); disposeTree(opG); opG.clear(); disposeTree(envG); envG.clear(); if (R.kind !== 'out') { disposeTree(houseG); houseG.clear(); }
   const H = R.H;
   if (R.kind === 'out') { buildOutdoor(); buildHandles(); applyLightMode(); return; }
+  buildRoomBody();
+  buildHandles(); applyVis();
+  if (sel && sel.k === 'op') updSelBox();
+}
+// 방 바닥·벽·창호 (RG/OG 그룹에 만듦 — 야외에 집으로 배치할 때도 재사용)
+function buildRoomBody() {
+  const H = R.H;
   // 바닥 / 슬래브 / 천장
   const sh = new THREE.Shape(OL.map(([x, z]) => new THREE.Vector2(x, -z))), shC = new THREE.Shape(OL.map(([x, z]) => new THREE.Vector2(x, z)));
   const ft = floorTex(R.fl, R.flc), tex = ft.tex; tex.repeat.set(1 / ft.u, 1 / ft.u); tex.center.set(0, 0); tex.rotation = (R.fld || 0) * PI / 180; tex.needsUpdate = true;
-  const fl = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshLambertMaterial({ map: tex })); fl.rotation.x = -PI / 2; fl.position.y = -0.2; roomG.add(fl);
-  const slab = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 10, bevelEnabled: false, curveSegments: 4 }), new THREE.MeshLambertMaterial({ color: 0xb9b2a6 })); slab.rotation.x = -PI / 2; slab.position.y = -10.5; roomG.add(slab);
-  const ce = new THREE.Mesh(new THREE.ShapeGeometry(shC), new THREE.MeshLambertMaterial({ color: 0xf7f6f2 })); ce.rotation.x = PI / 2; ce.position.y = H; ce.visible = !!PREF.ceil; ce.userData.ceil = 1; roomG.add(ce);
+  const fl = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshLambertMaterial({ map: tex })); fl.rotation.x = -PI / 2; fl.position.y = -0.2; RG.add(fl);
+  const slab = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 10, bevelEnabled: false, curveSegments: 4 }), new THREE.MeshLambertMaterial({ color: 0xb9b2a6 })); slab.rotation.x = -PI / 2; slab.position.y = -10.5; RG.add(slab);
+  const ce = new THREE.Mesh(new THREE.ShapeGeometry(shC), new THREE.MeshLambertMaterial({ color: 0xf7f6f2 })); ce.rotation.x = PI / 2; ce.position.y = H; ce.visible = !!PREF.ceil; ce.userData.ceil = 1; RG.add(ce);
   // 바닥 격자(50cm)
   const pts = []; for (let x = Math.ceil(BB.x0 / 50) * 50; x <= BB.x1; x += 50) for (let z = BB.z0; z < BB.z1; z += 10) if (inside(OL, x, z + 5)) pts.push(x, 0, z, x, 0, Math.min(z + 10, BB.z1));
   for (let z = Math.ceil(BB.z0 / 50) * 50; z <= BB.z1; z += 50) for (let x = BB.x0; x < BB.x1; x += 10) if (inside(OL, x + 5, z)) pts.push(x, 0, z, Math.min(x + 10, BB.x1), 0, z);
-  if (pts.length) { const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); const gl = new THREE.LineSegments(gg, new THREE.LineBasicMaterial({ color: 0, transparent: true, opacity: 0.07 })); gl.position.y = 0.1; roomG.add(gl); }
+  if (pts.length) { const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); const gl = new THREE.LineSegments(gg, new THREE.LineBasicMaterial({ color: 0, transparent: true, opacity: 0.07 })); gl.position.y = 0.1; RG.add(gl); }
   // 벽
   const bbm = new THREE.MeshLambertMaterial({ color: R.bb });
   E.forEach(e => {
@@ -296,10 +370,8 @@ function buildRoom() {
   OPS.forEach(o => {
     clampOp(o); const e = E[o.wall], g = buildOpening(o, R), [x, z] = EP(e, o.s);
     g.position.set(x, 0, z); g.rotation.y = e.ry;
-    g.traverse(c => { c.userData.op = o; }); g.userData.op = o; o.g = g; opG.add(g);
+    g.traverse(c => { c.userData.op = o; }); g.userData.op = o; o.g = g; OG.add(g);
   });
-  buildHandles(); applyVis();
-  if (sel && sel.k === 'op') updSelBox();
 }
 function buildHandles() {
   disposeTree(hdG); hdG.clear(); if ((!PREF.handles && !PREF.shapeEdit) || R.lock) return;
@@ -483,7 +555,7 @@ function mk(it) {
     else if (p.g === 's') geo2 = new THREE.SphereGeometry(Math.max(0.05, p.r), p.ws || 16, p.hs || 12, p.phs || 0, p.phl || PI * 2, p.ths || 0, p.tl || PI);
     else if (p.g === 't') geo2 = new THREE.TorusGeometry(p.r, p.t, 8, p.ts || 28, p.arc || PI * 2);
     else geo2 = new THREE.BoxGeometry(Math.max(0.05, p.w), Math.max(0.05, p.h), Math.max(0.05, p.d));
-    const q = new THREE.Mesh(geo2, mt);
+    const q = new THREE.Mesh(geo2, mt); if (p.tex === 'face') q.userData.faceTex = 1;
     if (p.g === 'b' || p.g === 'c') q.position.set(p.x, p.y + p.h / 2, p.z); else q.position.set(p.x, p.y, p.z);
     q.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0); q.scale.set(p.sx || 1, p.sy || 1, p.sz || 1);
     q.userData.it = it; m.add(q);
@@ -666,7 +738,7 @@ function addResizeHandles(it) {
   g.add(c1, c2); g.userData.hd = [c1, c2];
 }
 function updSelBox() {
-  if (sel && (sel.k === 'op' || sel.k === 'light') && sel.o.g) { selBox.setFromObject(sel.o.g); selBox.visible = true; } else selBox.visible = false;
+  if (sel && (sel.k === 'op' || sel.k === 'light' || sel.k === 'house') && sel.o.g) { selBox.setFromObject(sel.o.g); selBox.visible = true; } else selBox.visible = false;
   if (isMulti()) { const b = mBox.box.makeEmpty(); sel.list.forEach(o => o.g && b.expandByObject(o.g)); b.expandByScalar(2); mBox.visible = true; } else mBox.visible = false;
 }
 function setSel(s, tab) {
@@ -920,9 +992,10 @@ function delObj(s) {
   else if (s.k === 'light') { ltG.remove(o.g); disposeTree(o.g); LIGHTS = LIGHTS.filter(i => i !== o); renderLights(); }
   else if (s.k === 'vert') return deleteVertex(s.i);
 }
-function delSel() { if (isMulti()) return delMulti(sel.list); if (!sel || lockGuard(sel)) return; delObj(sel); setSel(null); upd(); }
+function delSel() { if (sel && sel.k === 'house') return removeHouse(sel.o); if (isMulti()) return delMulti(sel.list); if (!sel || lockGuard(sel)) return; delObj(sel); setSel(null); upd(); }
 function dupSel() {
   if (isMulti()) return dupMulti(sel.list);
+  if (sel && sel.k === 'house') return placeHouses([sel.o.sid]);
   if (!sel || !sel.o) return; const o = sel.o;
   if (sel.k === 'item') { const it = newItem({ ...clean(o), id: undefined, no: undefined, lock: 0 }); it.id = nid++; it.x += 20; it.z += 20; ensureNo(it, [...items, it], x => grp(x.type)); items.push(it); mk(it); fit(it, false); if (overlapsAny(it)) freeSpot(it); setSel({ k: 'item', o: it }); }
   else if (sel.k === 'op') { const n = { ...clean(o), id: nid++, no: undefined, lock: 0 }; n.s = o.s + o.w + 10; ensureNo(n, [...OPS, n], x => x.kind); clampOp(n); OPS.push(n); buildRoom(); renderRoom(); setSel({ k: 'op', o: n }); }
@@ -931,6 +1004,7 @@ function dupSel() {
 }
 function rotSel(deg = 90) {
   if (!sel) return; if (isMulti()) return rotMulti(sel.list, deg, PREF.rotEach);
+  if (sel.k === 'house') { const hs = sel.o; if (hs.lock) return toast('잠긴 집입니다'); hs.rot = norm360((hs.rot || 0) + deg); if (hs.g) hs.g.rotation.y = hs.rot * PI / 180; updSelBox(); syncSel(); return upd(); }
   if (sel.k === 'item') { const it = sel.o; if (it.lock) return toast('잠긴 가구입니다'); if (it.mt === 'w') return toast('벽 부착 가구는 벽 방향을 따릅니다'); it.rot = norm360((it.rot || 0) + deg); fit(it, false); upd(); }
   else if (sel.k === 'light' && !lightIsWall(sel.o)) { if (lockGuard(sel)) return; sel.o.rot = norm360((sel.o.rot || 0) + deg); placeLight(sel.o); upd(); }
 }
@@ -1222,6 +1296,7 @@ function captureGuide(k, w, h) {
     opG.children.forEach(g => { const o = g.userData.op; if (!o) return; const win = o.kind === 'win'; g.traverse(m => { if (!m.isMesh) return; const glass = m.material && m.material.transparent; set(m, M(glass ? (win ? 0x8fb4ff : 0xffc08a) : (win ? 0x0050ff : 0xff6a00), glass ? (win ? 0.5 : 0.14) : 1)); }); });
     items.forEach((it, i) => { if (!it.g) return; const m = M(guideColor(i)[0]); it.g.traverse(o => { if (o.isMesh) set(o, m); }); });
     ltG.traverse(o => { if (o.isMesh) set(o, M(0xffd400)); });
+    houseG.traverse(o => { if (o.isMesh) { const hs = o.userData.house, op = o.userData.op || (o.parent && o.parent.userData.op); set(o, M(op ? (op.kind === 'win' ? 0x0050ff : 0xff6a00) : 0x7d7d7d)); } });
     return captureView(k, w, h);
   } finally { saved.forEach(([o, m]) => { o.material = m; }); made.forEach(m => m.dispose()); scene.background = bg; scene.fog = fog; }
 }
@@ -1236,6 +1311,7 @@ function layoutText(k, w, h) {
     const tint = (GTINT.find(t => t[0] === (o.gtint || 'clear')) || [])[1], glass = o.kind === 'win' || ['jung3', 'jung1', 'swingG', 'folding'].includes(o.st) || o.glass ? `, glass ${o.gop ?? 72}% transparent (${tint})` : '';
     L.push(`- ${opLabel(o)} = ${o.kind === 'win' ? 'WINDOW' : 'DOOR'} "${nm}" ${rd(o.w)}cm wide × ${rd(o.h)}cm tall${o.kind === 'win' ? `, sill ${rd(o.y)}cm above floor, top at ${rd(o.y + o.h)}cm (ceiling ${R.H}cm)` : ''}; it takes ${Math.round(o.w / e.len * 100)}% of the ${rd(e.len)}cm-long ${side(e)}${glass}${o.st === 'jung3' ? `, open state ${o.open ? Math.round(o.open) + ' of 2 panels slid' : 'closed'}` : ''}. ${bx ? `In image #1 it occupies x ${bx.l}–${bx.r}%, y ${bx.t}–${bx.b}% of the frame — keep EXACTLY this position and size.` : 'It is NOT visible from this camera — do not draw it.'}`);
   });
+  if (R.kind === 'out') (R.houses || []).forEach(hs => { if (!hs.g) return; const bx = box2(hs.g); L.push(`- HOUSE "${hs._name}" ${rd(hs._w)}×${rd(hs._d)}cm, ${rd(hs._h)}cm walls, ${hs.roof || 'flat'} roof = dark gray in the guide${bx ? `; x ${bx.l}–${bx.r}%, y ${bx.t}–${bx.b}% — keep exactly` : ' (not visible)'}.`); });
   const vis = items.map((it, i) => ({ it, i, bx: it.g ? box2(it.g) : null })).filter(x => x.bx).sort((a, b) => b.bx.area - a.bx.area).slice(0, 14);
   vis.forEach(({ it, i, bx }) => L.push(`- ${itemLabel(it)} "${it.name}" (${TYPES[it.type] || it.type}, ${rd(fpw(it))}×${rd(it.d)}×${rd(it.h)}cm) = ${guideColor(i)[1]} in the guide; x ${bx.l}–${bx.r}%, y ${bx.t}–${bx.b}%.`));
   return L.join('\n');
@@ -1251,11 +1327,11 @@ function wallPlaneHit(e) { const n = new THREE.Vector3(e.n[0], 0, e.n[1]); retur
 function pick() {
   const hs = [...hdG.children]; if (sel && sel.k === 'item' && sel.o.g.userData.hd) hs.push(...sel.o.g.userData.hd);
   const h0 = ray.intersectObjects(hs, true)[0]; if (h0) return h0;
-  return ray.intersectObjects([...items.map(i => i.g.userData.m), opG, ltG], true).find(h => h.object.visible !== false && !h.object.userData.scenery) || null;
+  return ray.intersectObjects([...items.map(i => i.g.userData.m), opG, ltG, ...(R.kind === 'out' ? [houseG] : [])], true).find(h => h.object.visible !== false && !h.object.userData.scenery) || null;
 }
 function classify(h) {
   let o = h.object;
-  while (o) { const u = o.userData; if (u.rh) return { k: 'rh', it: u.rh, ax: u.ax }; if (u.h) return { k: 'room', h: u.h }; if (u.it) return { k: 'item', o: u.it }; if (u.op) return { k: 'op', o: u.op }; if (u.lt) return { k: 'light', o: u.lt }; o = o.parent; }
+  while (o) { const u = o.userData; if (u.house) return { k: 'house', o: u.house }; if (u.rh) return { k: 'rh', it: u.rh, ax: u.ax }; if (u.h) return { k: 'room', h: u.h }; if (u.it) return { k: 'item', o: u.it }; if (u.op) return { k: 'op', o: u.op }; if (u.lt) return { k: 'light', o: u.lt }; if (u.house) return { k: 'house', o: u.house }; o = o.parent; }
   return null;
 }
 let drag = null, down = null, mode = null, raf = 0, lpT = null;
@@ -1290,6 +1366,7 @@ cv.addEventListener('pointerdown', e => {
     const p = hitY(h.point.y); if (p) startDrag({ k: 'item', it, py: h.point.y, ox: it.x - p.x, oz: it.z - p.z });
     return;
   }
+  if (f.k === 'house') { const hs = f.o, was = sel && sel.o === hs; if (!was) setSel({ k: 'house', o: hs }, isMobile() ? null : 'sel'); if (hs.lock || (down.touch && PREF.touchSafe && !was)) return; const py = Math.max(0, h.point.y), p = hitY(py); if (p) startDrag({ k: 'house', hs, py, ox: hs.x - p.x, oz: hs.z - p.z }); return; }
   if (f.k === 'op') { const o = f.o, was = sel && sel.o === o; if (!was) setSel({ k: 'op', o }, isMobile() ? null : 'sel'); if (o.lock || (down.touch && PREF.touchSafe && !was)) return; const e2 = E[o.wall], p = wallPlaneHit(e2); if (p) { const q = segDist(e2, p.x, p.z); startDrag({ k: 'op', o, off: o.s - q.s, y0: o.y, py0: p.y }); } return; }
   if (f.k === 'light') { const l = f.o, was = sel && sel.o === l; if (!was) setSel({ k: 'light', o: l }, isMobile() ? null : 'sel'); if (l.lock || (down.touch && PREF.touchSafe && !was)) return; const py = lightIsWall(l) ? l.y : R.H - 10, p = hitY(py) || hitY(0); if (p) startDrag({ k: 'light', l, py, ox: (l.x || 0) - p.x, oz: (l.z || 0) - p.z }); }
 }, true);
@@ -1300,6 +1377,7 @@ cv.addEventListener('pointermove', e => {
   if (!drag) { if (e.pointerType === 'mouse' && !raf) raf = requestAnimationFrame(() => { raf = 0; const h = pick(), f = h && classify(h); cv.style.cursor = mode === 'measure' ? 'crosshair' : f ? (f.k === 'room' ? (f.h.t === 'edge' ? 'move' : 'pointer') : f.k === 'rh' ? 'nwse-resize' : 'grab') : 'default'; }); return; }
   const d = drag;
   if (d.k === 'marq') { marqRect(d, e.clientX, e.clientY); return; }
+  if (d.k === 'house') { const p = hitY(d.py); if (!p) return; const hs = d.hs; hs.x = snapV(p.x + d.ox, 5); hs.z = snapV(p.z + d.oz, 5); if (hs.g) hs.g.position.set(hs.x, 0, hs.z); updSelBox(); syncSel(); return; }
   if (d.k === 'multi') {
     const p = hitY(d.py); if (!p) return; let dx = p.x - d.p0[0], dz = p.z - d.p0[1];
     if (PREF.snap && !e.altKey) { dx = Math.round(dx / 5) * 5; dz = Math.round(dz / 5) * 5; }
@@ -1385,7 +1463,7 @@ function endDrag(e) {
   down = null;
 }
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', () => { drag = null; ctl.enabled = true; down = null; clearTimeout(lpT); marqEl.hidden = true; });
-cv.addEventListener('dblclick', () => focusSel());
+cv.addEventListener('dblclick', () => { if (sel && sel.k === 'house') return switchSpace(sel.o.sid); focusSel(); });
 cv.addEventListener('contextmenu', e => { if (isMobile()) e.preventDefault(); });
 
 addEventListener('keydown', e => {
@@ -1409,6 +1487,7 @@ addEventListener('keydown', e => {
   const st = e.altKey ? 1 : e.shiftKey ? 20 : 5;
   let dx = 0, dz = 0;
   if (k === 'ArrowLeft') dx = -st; else if (k === 'ArrowRight') dx = st; else if (k === 'ArrowUp') dz = -st; else if (k === 'ArrowDown') dz = st;
+  if (sel.k === 'house' && (dx || dz)) { e.preventDefault(); const hs = sel.o; hs.x += dx; hs.z += dz; if (hs.g) hs.g.position.set(hs.x, 0, hs.z); updSelBox(); return upd(); }
   if (isMulti()) {
     if (k === '[' || k === ']') return scaleMulti(sel.list, k === ']' ? 1.05 : 1 / 1.05, PREF.mSpread);
     if (dx || dz) { e.preventDefault(); return moveMulti(sel.list, dx, dz); }
@@ -1463,7 +1542,7 @@ function sysNotify(title, body) { try { if (document.hidden && 'Notification' in
 function askNotifyPerm() { try { if (!NOTE_PERM && 'Notification' in window && Notification.permission === 'default') { NOTE_PERM = true; Notification.requestPermission().catch(() => { }); } } catch (e) { } }
 function toast(t, ms = 2800, act, opt = {}) {
   const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(tt); tt = setTimeout(() => { el.hidden = true; }, ms);
-  const s0 = String(t), type = opt.type || (/^(⚠|❌)|실패|오류|없습니다|할 수 없|거절/.test(s0) ? 'err' : /^(✅|🎨|☁|💾|＋|⧉|🗑|📎|🖼|🔒|🔓)|했습니다|됐습니다|완료/.test(s0) ? 'ok' : 'info');
+  const s0 = String(t), type = opt.type || (/^ℹ/.test(s0) ? 'info' : null) || (/^(⚠|❌)|실패|오류|없습니다|할 수 없|거절/.test(s0) ? 'err' : /^(✅|🎨|☁|💾|＋|⧉|🗑|📎|🖼|🔒|🔓)|했습니다|됐습니다|완료/.test(s0) ? 'ok' : 'info');
   const n = h('div', { class: 'note ' + type, role: type === 'err' ? 'alert' : 'status' }, h('span', { class: 'ni' }, type === 'ok' ? '✓' : type === 'err' ? '!' : 'i'), h('span', { class: 'nt' }, s0));
   if (act) n.append(h('button', { class: 'na', type: 'button', onclick: e => { e.stopPropagation(); close(); act[1](); } }, act[0]));
   n.append(h('button', { class: 'nx', type: 'button', 'aria-label': '닫기', onclick: e => { e.stopPropagation(); close(); } }, '×'));
@@ -1726,6 +1805,7 @@ function infoSel() {
 function renderSel() {
   const b = $('t-sel'); b.innerHTML = '';
   if (!sel) { app(b, h('p', { class: 'mu' }, '3D 화면이나 목록에서 가구·창호·조명·벽을 선택하세요.'), h('p', { class: 'mu sm' }, isMobile() ? '터치: 한 번 눌러 선택 → 다시 끌어서 이동 · 길게 누르면 상세 편집' : '더블클릭: 선택 대상으로 카메라 이동')); syncSel(); return; }
+  if (sel.k === 'house') { housePanel(b, sel.o); app(b, h('div', { id: 'inf', class: 'inf' })); syncSel(); return; }
   if (isMulti()) { multiPanel(b); app(b, h('div', { id: 'inf', class: 'inf' })); infoSel(); syncSel(); return; }
   if (sel.k === 'item') itemPanel(b, sel.o); else if (sel.k === 'op') opPanel(b, sel.o); else if (sel.k === 'light') lightPanel(b, sel.o); else if (sel.k === 'edge') edgePanel(b, sel.i); else vertPanel(b, sel.i);
   if (isLocked(sel)) { b.querySelectorAll('input,select,textarea,button').forEach(el => { if (!el.closest('.keep')) el.disabled = true; }); b.prepend(h('div', { class: 'lockbar' }, '🔒 잠금 상태 — 위치·크기·모양을 바꿀 수 없습니다', BTN('잠금 해제', () => setLock(sel, 0), 'c'))); }
@@ -1964,7 +2044,7 @@ function quick() {
   $('qbn').textContent = it ? `${itemLabel(o)} ${o.name} · ${r1(fpw(o))}×${r1(o.d)}×${r1(o.h)}` : sel.k === 'op' ? `${opLabel(o)} · ${(o.kind === 'win' ? WIN_ST : DOOR_ST).find(s => s[0] === o.st)?.[1] || ''} ${rd(o.w)}×${rd(o.h)}` : sel.k === 'light' ? `${lightLabel(o)} · ${(LKIND[o.kind] || {}).n}` : labelOf(sel);
   q.querySelectorAll('.qi').forEach(e => e.hidden = !it);
   const canRot = (it && o.mt !== 'w') || (sel.k === 'light' && !lightIsWall(o) && (LKIND[o.kind] || {}).rot);
-  q.querySelector('[data-q=rot]').hidden = !canRot;
+  q.querySelector('[data-q=rot]').hidden = !(canRot || sel.k === 'house');
   if (!canRot || q._last !== o) $('qbrot').hidden = true; q._last = o;
   q.querySelector('[data-q=dup]').hidden = !o;
   if (it && document.activeElement !== $('qbp')) $('qbp').value = rd(pctAll(o));
@@ -2037,6 +2117,7 @@ const OUT_TIME = [['auto', '자동 (주간/야간 모드)'], ['day', '맑은 낮
 function outdoorPanel(b, rect) {
   const D0 = ENV_DEF[R.env] || ENV_DEF.field, RB = () => { buildRoom(); commitSoon(); };
   app(b,
+    h('h3', {}, '🏠 집·방 배치'), housesBlock(),
     h('h3', {}, '야외 환경'),
     h('div', { class: 'ch' }, ENVS.map(([k, n]) => BTN(n, () => { R.env = k; R.gk = ENV_DEF[k].g; R.gc = ENV_DEF[k].gc; RB(); renderRoom(); }, 'c' + (R.env === k ? ' on' : '')))),
     G(2, F('지면', bsel(GROUNDS, () => R.gk || D0.g, v => { R.gk = v; RB(); })), F('지면 색', bcol(() => R.gc || D0.gc, v => { R.gc = v; buildRoom(); }))),
@@ -2357,7 +2438,9 @@ function runActions(actions = []) {
       else if (op === 'addSpace' || op === 'space') {
         const kind = a.kind === 'outdoor' || a.kind === 'out' || a.env ? 'out' : 'room', W = +a.W || (kind === 'out' ? 1200 : 350), D = +a.D || (kind === 'out' ? 1000 : 330);
         const st = kind === 'out' ? outdoorState(ENV_DEF[a.env] ? a.env : 'field', W, D) : roomState(W, D, +a.H || 230);
+        const roomsNow = SPACES.filter(x => x.kind !== 'out').map(x => x.id);
         addSpace(a.name || (kind === 'out' ? '야외' : '방'), st); log.push(`＋ 공간 '${a.name || ''}' 추가 (${kind === 'out' ? '야외' : '방'})`);
+        if (kind === 'out' && a.house !== false && roomsNow.length) { placeHouses(roomsNow); log.push(`🏠 집(방 ${roomsNow.length}개)을 야외에 배치`); }
       }
       else if (op === 'switchSpace') { const sp = SPACES.find(x => x.name === a.name || x.id === a.id); if (sp) { switchSpace(sp.id); log.push(`→ '${sp.name}'(으)로 이동`); } else log.push(`⚠ 공간 '${a.name}' 없음`); }
       else if (op === 'night') { setNight(a.value ? 1 : 0); log.push(a.value ? '🌙 야간 모드' : '☀ 주간 모드'); }
@@ -2376,6 +2459,7 @@ function describe() {
   return {
     space: { name: spc.name, kind: R.kind === 'out' ? 'outdoor' : 'room', env: R.env, envName: R.kind === 'out' ? (ENVS.find(e => e[0] === R.env) || [])[1] : undefined, ground: R.kind === 'out' ? (GROUNDS.find(g => g[0] === (R.gk || (ENV_DEF[R.env] || {}).g)) || [])[1] : undefined, groundColor: R.gc, time: vtimeNow(), desc: R.desc },
     spaces: SPACES.map(x => ({ name: x.name, kind: x.kind === 'out' ? 'outdoor' : 'room', current: x.id === SPID })),
+    houses: R.kind === 'out' ? (R.houses || []).filter(x => x.g).map(x => ({ room: x._name, w: rd(x._w), d: rd(x._d), h: rd(x._h), x: rd(x.x - BB.x0), z: rd(x.z - BB.z0), rot: x.rot || 0, roof: x.roof || 'flat' })) : undefined,
     unit: 'cm', coord: 'x=왼쪽 외곽에서 가구 중심까지, z=뒤쪽 외곽에서 가구 중심까지, rot=반시계 회전(도, 위에서 볼 때). 시계방향 N° 회전은 drot:-N, 반시계 N°는 drot:N. 벽 번호는 1부터.',
     room: { W: R.W, D: R.D, H: R.H, locked: !!R.lock, shape: isRect(R.pts, R.bul) ? 'rect' : 'custom', area_m2: +(roomArea() / 10000).toFixed(2), floor: { type: R.fl, color: R.flc, dir: R.fld || 0 }, wallColor: R.wc, outsideView: R.view, viewTime: R.vtime, night: !!PREF.night, walls: E.map(e => ({ label: '벽' + (e.i + 1), from: e.a.map(P1), to: e.b.map(P1), len: P1(e.len), curved: !straight(e), color: R.wcs[e.i] || R.wc })) },
     items: items.map(i => ({ desc: i.desc || (i.type === 'rug' || i.type === 'rugR' ? (i.rugImg ? 'rug with EXACTLY the pattern of its reference photo' : rugDesc(i)) : undefined), body: i.body, refs: (i.refs || []).length || undefined, label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
@@ -2388,7 +2472,7 @@ const API = {
   CAT, TYPES, MATS, LKIND, WIN_ST, DOOR_ST, SHAPES, COLSTY, OUTFITS, HAIRS, POSES, VIEWS, FLOORS,
   describe, runActions, captureView, captureGuide, layoutText, notify, askNotifyPerm, planCanvas, shot3D, toast, saveFile, fname, showTab, setSheet, h, BTN, F, G, app, isMobile,
   itemLabel, lightLabel, opLabel, grp, addPreset, placeNew, newItem, specToItem, saveCustom, saveLibDialog, renderCatalog, commit: () => commitSoon(0),
-  newSpace({ kind, env, W, D, H, name }) { const out = kind === 'outdoor' || kind === 'out'; const st = out ? outdoorState(ENV_DEF[env] ? env : 'field', +W || 1200, +D || 1000) : roomState(+W || 350, +D || 330, +H || 230); return addSpace(name || (out ? '야외' : '방'), st); },
+  newSpace({ kind, env, W, D, H, name, house = true }) { const out = kind === 'outdoor' || kind === 'out'; const st = out ? outdoorState(ENV_DEF[env] ? env : 'field', +W || 1200, +D || 1000) : roomState(+W || 350, +D || 330, +H || 230); const rooms = SPACES.filter(x => x.kind !== 'out').map(x => x.id); const id = addSpace(name || (out ? '야외' : '방'), st); if (out && house && rooms.length) placeHouses(rooms); return id; },
   applyRoomSpec(spec) {
     const pts = Array.isArray(spec.pts) && spec.pts.length >= 3 && spec.pts.every(p => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1])) ? spec.pts.map(p => [+p[0], +p[1]]) : null;
     if (pts) { R.pts = orient(pts); R.bul = {}; normalizeRoom(); geo(); spec = { ...spec, W: 0, D: 0 }; }

@@ -1,5 +1,5 @@
 // AI 기능 UI: 대화 명령 · 사진 인식(가구/사람/방) · 실사 렌더 · 설정(키·모델) · 갤러리
-import { PROVIDERS, TASKS, DEFAULT_MODELS, parseKeys, aiText, aiImage, parseJSON, listModels, fileToDataURL, coverResize } from './ai.js';
+import { PROVIDERS, TASKS, DEFAULT_MODELS, parseKeys, aiText, aiImage, parseJSON, listModels, fileToDataURL, coverResize, splitKeys, testKeys } from './ai.js';
 import { Cloud, parseCfg, saveCfg, loadCfg, RULES, cfgLink, cfgFileCode, BUILTIN } from './cloud.js';
 import qrcode from 'qrcode-generator';
 import { cropFace, centerBox, sampleSkin } from './faces.js';
@@ -54,13 +54,16 @@ export function initAI(A) {
       body.innerHTML = '';
       app(body, where, h('h3', {}, 'API 키'),
         ...Object.entries(PROVIDERS).map(([p, v]) => {
-          const inp = h('input', { type: 'password', placeholder: v.hint, value: KEYS[v.key] || '', autocomplete: 'off' }), st = h('small', { class: 'mu' }, KEYS[v.key] ? `저장됨 ••••${KEYS[v.key].slice(-4)}` : '없음');
+          const ks = splitKeys(KEYS[v.key]), inp = h('textarea', { class: 'keyta mask', rows: Math.max(1, Math.min(4, ks.length || 1)), placeholder: v.hint, autocomplete: 'off', spellcheck: 'false' }, (KEYS[v.key] || '').split(/[\s,;]+/).filter(Boolean).join('\n')), st = h('small', { class: 'mu' }, ks.length ? `키 ${ks.length}개 · ${ks.map(k => '••••' + k.slice(-4)).join(', ')}${ks.length > 1 ? ' · 위에서부터 차례로, 실패하면 다음 키' : ''}` : '없음');
+          const tres = h('div', { class: 'tres' });
           return h('div', { class: 'kc' }, h('div', { class: 'kh' }, h('b', {}, v.name), st),
-            h('div', { class: 'kr' }, inp, BTN('👁', () => { inp.type = inp.type === 'password' ? 'text' : 'password'; }, 'c')),
+            h('div', { class: 'kr' }, inp, BTN('👁', () => { inp.classList.toggle('mask'); }, 'c')),
+            h('p', { class: 'mu sm' }, '키를 여러 개 넣으려면 한 줄에 하나씩 — 크레딧 소진(402)·한도 초과(429)·잘못된 키면 자동으로 다음 키를 씁니다.'),
             h('div', { class: 'r' },
-              BTN('저장/업데이트', async () => { KEYS[v.key] = inp.value.trim(); saveLocal(); await saveCloud(); toast(`${v.name} 키를 저장했습니다`); render(); }, 'b'),
+              BTN('🔌 키별 연결 확인', async e => { const b = e.target, val = inp.value.trim() || KEYS[v.key]; if (!val) return toast('키를 먼저 넣으세요'); b.disabled = true; b.textContent = '확인 중…'; tres.innerHTML = ''; const r = await testKeys(p, val); r.forEach(x => tres.append(h('div', { class: x.ok ? 'ok' : 'warn' }, `${x.ok ? '✅' : '❌'} ••••${x.k.slice(-4)} — ${x.ok ? `사용 가능 (모델 ${x.n}개)` : x.msg}`))); const good = r.find(x => x.ok); if (good) { EXTRA[p] = good.r; saveLocal(); } b.disabled = false; b.textContent = '🔌 키별 연결 확인'; toast(good ? `✅ ${v.name}: ${r.filter(x => x.ok).length}/${r.length}개 키 사용 가능` : `⚠ ${v.name}: 사용 가능한 키가 없습니다`, 6000, null, { type: good ? 'ok' : 'err' }); }, 'c'),
+              BTN('저장/업데이트', async () => { KEYS[v.key] = splitKeys(inp.value).join('\n'); saveLocal(); await saveCloud(); toast(`${v.name} 키를 저장했습니다`); render(); }, 'b'),
               BTN('삭제', async () => { delete KEYS[v.key]; saveLocal(); await saveCloud(); toast('삭제했습니다'); render(); }),
-              BTN('연결 테스트 · 모델 목록 불러오기', async e => { const b = e.target; b.disabled = true; b.textContent = '확인 중…'; try { const r = await listModels(p, inp.value.trim() || KEYS[v.key]); EXTRA[p] = r; saveLocal(); await saveCloud(); toast(`✅ 연결됨 · 모델 ${r.text.length + r.image.length}개`); render(); } catch (err) { toast('❌ ' + err.message, 7000); b.disabled = false; b.textContent = '다시 시도'; } })));
+              BTN('연결 테스트 · 모델 목록 불러오기', async e => { const b = e.target; b.disabled = true; b.textContent = '확인 중…'; try { const r = await listModels(p, inp.value.trim() || KEYS[v.key]); EXTRA[p] = r; saveLocal(); await saveCloud(); toast(`✅ 연결됨 · 모델 ${r.text.length + r.image.length}개`); render(); } catch (err) { toast('❌ ' + err.message, 7000); b.disabled = false; b.textContent = '다시 시도'; } })), tres);
         }),
         h('h4', {}, '키 한 번에 붙여넣기'), paste,
         h('div', { class: 'r' }, BTN('인식해서 저장', async () => { const k = parseKeys(paste.value); if (!Object.keys(k).length) return toast('인식된 키가 없습니다'); Object.assign(KEYS, k); saveLocal(); await saveCloud(); toast(`${Object.keys(k).length}개 키를 저장했습니다`); paste.value = ''; render(); }, 'b'), BTN('이 기기에서 모든 키 지우기', () => { if (!confirm('이 브라우저에 저장된 키를 지울까요? (클라우드 사본은 유지)')) return; KEYS = {}; LS.set(K_KEYS, {}); render(); })),
@@ -343,6 +346,7 @@ JSON 하나만:
   function sceneText(viewKey) {
     const d = A.describe(), r = d.room, L = [], sp = d.space || {};
     if (sp.kind === 'outdoor') {
+      if ((d.houses || []).length) L.push(`Buildings on the site (keep them exactly, same footprint, height, windows and doors as in image #1): ${d.houses.map(x => `a single-storey house containing the room "${x.room}" ${x.w}x${x.d}cm, ${x.h}cm wall height, ${x.roof === 'gable' ? 'gable roof' : x.roof === 'none' ? 'no roof (cut-away view showing the interior)' : 'flat roof'}`).join('; ')}.`);
       L.push(`OUTDOOR scene (no walls, no ceiling): ${sp.envName || sp.env} environment. Usable site ${r.W}cm x ${r.D}cm (dashed boundary is only a guide — do NOT draw it). Ground: ${sp.ground || ''} (${sp.groundColor || ''}). Time/weather: ${sp.time}. Keep the surrounding scenery type (mountains/sea/forest/city etc.) as in the input.${sp.desc ? ' Look & feel: ' + sp.desc : ''}`);
     } else {
     L.push(`Room: ${r.W}cm wide x ${r.D}cm deep, ceiling ${r.H}cm, ${r.shape === 'rect' ? 'rectangular' : 'custom-shaped (' + r.walls.length + ' walls' + (r.walls.some(w => w.curved) ? ', with curved wall' : '') + ')'}.`);
@@ -375,7 +379,7 @@ ${sceneText(viewKey)}`;
   function openRender(pre = {}) {
     const R = A.R, nCorner = Math.min(6, R.pts.length);
     const VIEWS = [['cur', '현재 화면'], ['door', '입구 시점'], ['iso', '대각선 (오른쪽)'], ['isoL', '대각선 (왼쪽)'], ['top', '위에서'], ...Array.from({ length: nCorner }, (_, i) => [`eye${i}`, `눈높이 · 모서리 ${i + 1}`]), ['sel', '선택 대상 클로즈업']];
-    const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high', useRefs: true, extraRefs: [], guide: true };
+    const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high', useRefs: true, extraRefs: [], guide: true, faces: true, noPeople: false };
     const nRefs = () => (A.R.refs || []).length + A.items.reduce((n, i) => n + (i.refUse === 0 ? 0 : (i.refs || []).length), 0);
     const xfi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }); xfi.onchange = async () => { for (const f of xfi.files) st.extraRefs.push(await fileToDataURL(f, 1000, 0.85)); xfi.value = ''; draw(); };
     const body = h('div', {}), res = h('div', { class: 'rgrid' });
@@ -393,6 +397,8 @@ ${sceneText(viewKey)}`;
           h('div', { class: 'ch' }, STYLES.map(([k, n]) => h('button', { class: 'c' + (st.style === k ? ' on' : ''), onclick: () => { st.style = k; draw(); } }, n))),
           F('추가 요청 (선택)', h('textarea', { rows: 2, placeholder: '예: 창밖에 비 오는 저녁, 벽에 은은한 간접조명 반사', oninput: e => { st.extra = e.target.value; } }, st.extra)),
           h('div', { class: 'cg' }, h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.decor, onchange: e => { st.decor = e.target.checked; } }), '작은 소품(쿠션·책 등) 추가 허용'),
+            A.items.some(x => x.type === 'person') ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.faces, onchange: e => { st.faces = e.target.checked; } }), '👤 사람 얼굴 사진도 실사에 반영 (안전 필터에 자주 걸리면 끄세요)') : null,
+            A.items.some(x => x.type === 'person') ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.noPeople, onchange: e => { st.noPeople = e.target.checked; } }), '사람 빼고 공간만 실사로') : null,
             h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.guide, onchange: e => { st.guide = e.target.checked; } }), '🧭 구조 고정 (창·문·가구 위치·크기 가이드를 함께 보내 왜곡 방지 — 권장)'),
             h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.useRefs, onchange: e => { st.useRefs = e.target.checked; } }), `📎 가구·사람·공간에 붙인 참고 사진 반영 (${nRefs()}장)`)),
           h('div', { class: 'r' }, BTN('📎 이번 렌더용 참고 사진 추가', () => xfi.click(), 'c'), xfi, st.extraRefs.length ? BTN(`참고 ${st.extraRefs.length}장 지우기`, () => { st.extraRefs = []; draw(); }, 'c') : null),
@@ -425,26 +431,32 @@ ${sceneText(viewKey)}`;
             card._prompt = prompt;
             const people = A.items.filter(x => x.type === 'person'), small = card.querySelector('small');
             const peopleRefs = new Set(); for (const x of people) for (const r of (x.refs || [])) { const src = await getRef(r.id); if (src) peopleRefs.add(src); }
-            // 안전 필터 오탐 대비: 1) 그대로 → 2) 사람 설명을 단순하게·사람 참고 사진 제외 → 3) 사람 없이 → 4) 다른 이미지 AI
-            const tries = [{ n: '기본', im, prompt, image: cap, refs: [...(guide ? [guide] : []), ...rr.imgs, ...xr] }];
-            const plainPrompt = prompt.replace(/\(([^()]*)\) (?=[^\n]*\[사람\])/g, '').replace(/People:[^\n]*/g, '') + `\nPeople in the scene are ordinary, generic, non-identifiable adults in everyday clothes (${people.map(x => personEN(x, true)).join('; ')}).`;
-            tries.push({ n: '사람 묘사 단순화', im, prompt: plainPrompt, image: cap, refs: [...(guide ? [guide] : []), ...rr.imgs.filter(x => !peopleRefs.has(x)), ...xr] });
+            // 안전 필터 오탐 대비 (결과 이미지 검사는 1회 1분 가까이 걸려서 단계 수를 최소로):
+            // 1) 그대로 → 2) 사람이 있으면: 얼굴 사진·사람 참고 사진 빼고 다시 캡처 + 사람 묘사 단순화 → 3) 사람 없이 → 4) 다른 이미지 AI(키가 쓸 수 있을 때만)
+            const hideFaces = fn => { const hid = []; people.forEach(x => x.g && x.g.traverse(o => { if (o.userData.faceTex && o.visible) { o.visible = false; hid.push(o); } })); try { return fn(); } finally { hid.forEach(o => { o.visible = true; }); } };
+            const hasFace = people.some(x => x.face);
+            const plainPrompt = prompt.replace(/People:[^\n]*/g, '') + `\nPeople in the scene are ordinary, generic, non-identifiable adults in everyday clothes (${people.map(x => personEN(x, true)).join('; ')}). Do not depict any real or identifiable person.`;
+            let tries = [{ n: '기본', im, prompt, image: cap, refs: [...(guide ? [guide] : []), ...rr.imgs, ...xr] }];
+            if (people.length) tries.push({ n: hasFace ? '얼굴 사진 빼고' : '사람 묘사 단순화', im, prompt: plainPrompt, recap: 'faces', refs0: [...rr.imgs.filter(x => !peopleRefs.has(x)), ...xr] });
             if (people.length) tries.push({ n: '사람 제외', im, noPeople: true });
             const other = ['gemini', 'openai'].filter(p => p !== im.provider).map(p => ({ provider: p, model: (PROVIDERS[p].image[0] || [])[0], key: keyOf(p) })).find(x => x.key && x.model);
-            if (other) tries.push({ n: (PROVIDERS[other.provider] || {}).name + '로 다시', im: other, prompt: plainPrompt, image: cap, refs: tries[1].refs });
-            let gen = null, lastErr = null, used = null;
-            for (const t of tries) {
+            if (other) tries.push({ n: (PROVIDERS[other.provider] || {}).name + '로', im: other, prompt: people.length ? plainPrompt : prompt, recap: people.length ? 'faces' : null, refs0: [...rr.imgs.filter(x => !peopleRefs.has(x)), ...xr], soft: true });
+            if (people.length && st.noPeople) tries = tries.filter(t => t.noPeople || t.soft); else if (people.length && !st.faces) tries = tries.slice(1);
+            let gen = null, lastErr = null, used = null; const notes = [];
+            for (let ti = 0; ti < tries.length; ti++) {
+              const t = tries[ti];
               try {
-                if (t.noPeople) { const hid = people.filter(x => x.g && x.g.visible); hid.forEach(x => { x.g.visible = false; }); try { t.image = A.captureView(vk, cw, ch); t.refs = guide ? [A.captureGuide(vk, cw, ch)] : []; } finally { hid.forEach(x => { x.g.visible = true; }); } t.prompt = renderPrompt(vk, st).replace(/, a (man|woman|child) about[^;]*/g, '') + (guide ? gt.replace(/- [^\n]*\[?사람[^\n]*\n?/g, '') : '') + '\nDo not add any people.'; }
-                if (t !== tries[0]) small.textContent = `${name} · 안전 필터 오탐으로 다시 시도 (${t.n})…`;
+                if (t.recap === 'faces') { t.image = hideFaces(() => A.captureView(vk, cw, ch)); t.refs = [...(guide ? [guide] : []), ...t.refs0]; }
+                if (t.noPeople) { const hid = people.filter(x => x.g && x.g.visible); hid.forEach(x => { x.g.visible = false; }); try { t.image = A.captureView(vk, cw, ch); t.refs = guide ? [A.captureGuide(vk, cw, ch)] : []; } finally { hid.forEach(x => { x.g.visible = true; }); } t.prompt = renderPrompt(vk, st).replace(/, a (man|woman|child) about[^;]*/g, '') + (guide ? gt.replace(/- [^\n]*사람[^\n]*\n?/g, '') : '') + '\nDo not add any people.'; }
+                small.textContent = ti ? `${name} · 안전 필터에 거절되어 다른 방법으로 다시 시도 (${ti + 1}/${tries.length}: ${t.n}) — 1분 정도 걸릴 수 있어요` : `${name} · AI 생성 중… (20~90초)`;
                 const t0 = Date.now();
                 try { gen = await aiImage({ ...t.im, prompt: t.prompt, image: t.image, refs: t.refs, aspect: asp, quality: st.quality }); }
-                catch (e) { if (!e.safety || Date.now() - t0 < 20000) throw e; small.textContent = `${name} · 결과 이미지 검사에서 거절 — 같은 내용으로 한 번 더 시도…`; gen = await aiImage({ ...t.im, prompt: t.prompt, image: t.image, refs: t.refs, aspect: asp, quality: st.quality }); }
+                catch (e) { if (!e.safety || people.length || Date.now() - t0 < 20000) throw e; small.textContent = `${name} · 결과 이미지 검사에서 거절 — 같은 내용으로 한 번만 더 시도…`; gen = await aiImage({ ...t.im, prompt: t.prompt, image: t.image, refs: t.refs, aspect: asp, quality: st.quality }); }
                 used = t; break;
-              } catch (e) { lastErr = e; if (!e.safety) throw e; }
+              } catch (e) { lastErr = e; notes.push(`${t.n}: ${e.safety ? '안전 필터 거절' : (e.message || '').slice(0, 60)}`); if (!e.safety && !(t.soft && e.keyIssue)) throw e; }
             }
-            if (!gen) throw new Error('이미지 AI의 안전 필터가 계속 거절했습니다. 사람에게 붙인 참고 사진이나 얼굴 사진을 빼고 다시 시도해 보세요. (' + (lastErr && lastErr.message || '') + ')');
-            if (used !== tries[0]) toast(`ℹ 안전 필터 오탐을 피해 「${used.n}」 방식으로 생성했습니다`, 6000);
+            if (!gen) throw new Error(`이미지 AI 안전 필터가 계속 거절했습니다 (${notes.join(' → ')}). ${people.length ? '사람 객체의 얼굴 사진·참고 사진을 빼거나, 렌더 창에서 사람이 안 보이는 각도를 골라 보세요. ' : ''}Gemini 키(크레딧이 남은)를 추가하면 자동으로 함께 시도합니다.`);
+            if (used !== tries[0]) toast(`ℹ 안전 필터 거절을 피해 「${used.n}」 방식으로 생성했습니다${used.noPeople ? ' — 사람은 빠진 이미지입니다' : used.recap === 'faces' && hasFace ? ' — 얼굴 사진은 반영되지 않았습니다' : ''}`, 7000);
             out = await coverResize(gen, W, H);
           }
           showResult(card, out, cap, name, W, H);
