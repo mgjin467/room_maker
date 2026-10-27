@@ -225,8 +225,8 @@ actions 종류:
             vs.length ? F('사이즈/형태 선택', (() => { const s = h('select', {}, h('option', { value: -1 }, `대표 (${it.w}×${it.d}×${it.h})`), vs.map((v, i) => h('option', { value: i }, `${v.label || ''} ${v.w ?? ''}×${v.d ?? ''}×${v.h ?? ''}`))); s.value = it._v; s.onchange = () => { it._v = +s.value; apply(it._v); draw(); }; return s; })()) : null,
             G(4, F('모델', (() => { const s = h('select', {}, Object.entries(A.TYPES).map(([k, v]) => h('option', { value: k }, v))); s.value = A.TYPES[it.type] ? it.type : 'box'; s.onchange = () => { it.type = s.value; }; return s; })()), F('가로', num('w')), F('세로', num('d')), F('높이', num('h'))),
             G(3, F('색', h('input', { type: 'color', value: it.color || '#b0a090', oninput: e => { it.color = e.target.value; } })), F('재질', (() => { const s = h('select', {}, A.MATS.map(([k, v]) => h('option', { value: k }, v))); s.value = it.mat || ''; s.onchange = () => { it.mat = s.value; }; return s; })()), A.COLSTY[it.type] ? F('열 패턴', h('input', { type: 'text', value: it.cpat || '', oninput: e => { it.cpat = e.target.value.toUpperCase(); } })) : F('', h('span'))),
-            h('div', { class: 'r' }, BTN('배치에 추가', () => addFurn([it]), 'c'), BTN('내 가구로 저장', () => addFurn([it], true), 'c')));
-        }), h('div', { class: 'r' }, BTN('선택 항목 모두 배치에 추가', () => addFurn(list.filter(x => x._on)), 'b'), BTN('선택 항목 내 가구로 저장', () => addFurn(list.filter(x => x._on), true))));
+            h('div', { class: 'r' }, BTN('배치에 추가', () => addFurn([it]), 'c'), BTN('💾 내 가구로 저장…', () => addFurn([it], true), 'c')));
+        }), h('div', { class: 'r' }, BTN('선택 항목 모두 배치에 추가', () => addFurn(list.filter(x => x._on)), 'b'), BTN('💾 선택 항목 내 가구로 저장…', () => addFurn(list.filter(x => x._on), true))));
       }
       if (mode === 'people') {
         const list = result.people || []; if (!list.length) return h('p', { class: 'warn' }, '인식된 사람이 없습니다.');
@@ -240,8 +240,8 @@ actions 종류:
                 p.face ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: p._faceOn, onchange: e => { p._faceOn = e.target.checked; } }), '얼굴 사진 입히기') : null,
                 h('div', { class: 'cg' }, ...[['glasses', '안경'], ['flower', '가슴꽃'], ['bouquet', '부케'], ['veil', '면사포']].map(([k, t]) => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: !!p[k], onchange: e => { p[k] = e.target.checked; } }), t))))),
             G(4, F('성별', (() => { const s = h('select', {}, [['m', '남성'], ['f', '여성'], ['c', '어린이']].map(([v, t]) => h('option', { value: v }, t))); s.value = p.sex || 'm'; s.onchange = () => { p.sex = s.value; }; return s; })()), F('옷', (() => { const s = h('select', {}, A.OUTFITS.map(([v, t]) => h('option', { value: v }, t))); s.value = p.outfit || 'casual'; s.onchange = () => { p.outfit = s.value; }; return s; })()), F('키 (cm)', h('input', { type: 'number', inputmode: 'decimal', value: p.height, oninput: e => { p.height = +e.target.value; } })), F('이름', h('input', { type: 'text', value: p.name || '', placeholder: '예: 신랑', oninput: e => { p.name = e.target.value; } }))),
-            h('div', { class: 'r' }, BTN('배치에 추가', () => addPeople([p]), 'c'), BTN('사람 목록(내 가구)에 저장', () => addPeople([p], true), 'c')))),
-          h('div', { class: 'r' }, BTN('선택한 사람 모두 배치에 추가', () => addPeople(list.filter(x => x._on)), 'b'), BTN('모두 내 가구에 저장', () => addPeople(list.filter(x => x._on), true))));
+            h('div', { class: 'r' }, BTN('배치에 추가', () => addPeople([p]), 'c'), BTN('💾 내 가구로 저장…', () => addPeople([p], true), 'c')))),
+          h('div', { class: 'r' }, BTN('선택한 사람 모두 배치에 추가', () => addPeople(list.filter(x => x._on)), 'b'), BTN('💾 선택한 사람 내 가구로 저장…', () => addPeople(list.filter(x => x._on), true))));
       }
       const r = result.room || {};
       return h('div', {}, h('h3', {}, '인식된 방'), h('p', {}, `가로 ${r.W} · 깊이 ${r.D} · 높이 ${r.H || '-'} cm · 모양 ${r.shape || 'rect'}`),
@@ -251,8 +251,10 @@ actions 종류:
     draw(); return modal('📷 사진으로 인식', body, { wide: true });
   }
   function addFurn(list, save) {
-    list.forEach(it => { const spec = { ...it }; ['_on', '_v', 'variants', 'note', 'dims_source'].forEach(k => delete spec[k]); if (save) { const { it: obj } = A.specToItem(spec); A.saveCustom(obj, spec.name || obj.name); } else A.runActions([{ op: 'add', item: spec }]); });
-    toast(save ? `${list.length}개를 내 가구에 저장했습니다` : `${list.length}개를 배치했습니다`);
+    if (!list.length) return toast('선택된 항목이 없습니다');
+    const ent = [];
+    list.forEach(it => { const spec = { ...it }; ['_on', '_v', 'variants', 'note', 'dims_source'].forEach(k => delete spec[k]); if (save) { const { it: obj } = A.specToItem(spec); ent.push({ it: obj, name: spec.name || obj.name }); } else A.runActions([{ op: 'add', item: spec }]); });
+    if (save) A.saveLibDialog(ent); else toast(`${list.length}개를 배치했습니다`);
   }
   function personSpec(p) {
     const H = +p.height || (p.sex === 'f' ? 165 : 180), of = p.outfit || 'casual', f = H / (p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180);
@@ -293,8 +295,10 @@ actions 종류:
   }
   function addPeople(list, save) {
     const R = A.R, n = list.length;
-    list.forEach((p, i) => { const s = personSpec(p); if (save) { const { it } = A.specToItem(s); A.saveCustom(it, s.name); } else A.runActions([{ op: 'add', item: { ...s, x: R.W * (i + 1) / (n + 1), z: R.D * 0.55, rot: 0 } }]); });
-    toast(save ? `${n}명을 '내 가구'에 저장했습니다` : `${n}명을 배치했습니다`);
+    if (!n) return toast('선택된 사람이 없습니다');
+    const ent = [];
+    list.forEach((p, i) => { const s = personSpec(p); if (save) { const { it } = A.specToItem(s); ent.push({ it, name: s.name }); } else A.runActions([{ op: 'add', item: { ...s, x: R.W * (i + 1) / (n + 1), z: R.D * 0.55, rot: 0 } }]); });
+    if (save) A.saveLibDialog(ent, 'b:사람'); else toast(`${n}명을 배치했습니다`);
   }
 
   // ---------- 실사 렌더 ----------

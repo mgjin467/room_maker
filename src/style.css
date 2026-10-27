@@ -268,3 +268,16 @@ body.mob .pad select{width:52px}
 body.mob .pad select{font-size:16px;padding:0}
 body.mob #toast{top:auto;bottom:calc(var(--sh,104px) + 14px)}
 body.mob #qb button{padding:4px 8px}
+/* 내 가구 · 카테고리 */
+.cattb{align-items:center;margin:0 0 6px}
+#pre details>summary{display:flex;align-items:center;gap:4px}
+#pre summary .cbtn{margin-left:auto;background:none;border:0;color:var(--mu);font-size:13px;padding:2px 8px;cursor:pointer;border-radius:6px}
+#pre summary .cbtn:hover{background:var(--ch);color:var(--tx)}
+.ch .c.my{border-color:#e8b04a}
+.ch .c .x.ed{font-size:12px;opacity:.75;margin-left:4px}
+.catpick{display:flex;flex-direction:column;gap:6px}
+.svl{display:flex;flex-direction:column;gap:6px;margin:8px 0;max-height:46vh;overflow:auto}
+.svr{display:flex;align-items:center;gap:8px}.svr i{width:14px;height:14px;border-radius:4px;flex:none;border:1px solid var(--bd)}.svr input{flex:1;min-width:0}.svr small{color:var(--mu);white-space:nowrap}
+.catl{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+.catr{display:flex;align-items:center;gap:5px}.catr input{flex:1;min-width:0}.catr .cn{min-width:26px;text-align:center;font-size:11px;color:var(--mu);background:var(--ch);border-radius:10px;padding:2px 4px}
+.catr button{padding:5px 9px}

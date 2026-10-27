@@ -669,11 +669,11 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) { flu
 addEventListener('pageshow', e => { if (e.persisted) pullNow(); });
 function setSync(s, m) { syncState = s; const el = $('sync'); if (!el) return; if (!el.onclick) el.onclick = () => saveNow(); el.className = 'sync ' + s; el.title = { local: '이 기기에만 저장됨 — 눌러서 저장 (로그인하면 클라우드)', saving: '클라우드에 저장 중…', ok: '클라우드에 저장됨', err: '클라우드 저장 실패: ' + (m || '') }[s]; el.querySelector('.t').textContent = { local: '저장', saving: '저장 중', ok: '저장됨', err: '오류' }[s]; }
 let setT = null;
-function cloudSettingsSoon() { if (!Cloud.user) return; clearTimeout(setT); setT = setTimeout(() => Cloud.setMeta('settings', { sizes: SZ, custom: JSON.stringify(CUSTOM), prefs: JSON.stringify({ ...PREF, tab: undefined }), recent: RECENT }).catch(e => setSync('err', e.message)), 1200); }
+function cloudSettingsSoon() { if (!Cloud.user) return; clearTimeout(setT); setT = setTimeout(() => Cloud.setMeta('settings', { sizes: SZ, prefs: JSON.stringify({ ...PREF, tab: undefined }), recent: RECENT }).catch(e => setSync('err', e.message)), 1200); }
 async function onLogin(u, quiet) {
   if (!quiet) { renderFile(); renderAccount(); }
   if (unwatch) { unwatch(); unwatch = null; }
-  if (!u) { setSync('local'); return; }
+  if (!u) { if (unwatchLib) { unwatchLib(); unwatchLib = null; } setSync('local'); return; }
   if (!quiet) setSync('saving');
   try {
     flush();
@@ -698,7 +698,8 @@ async function onLogin(u, quiet) {
     });
     persist();
     const st = await Cloud.getMeta('settings');
-    if (st) { SZ = { ...SZ, ...(st.sizes || {}) }; LS.set(K_SZ, SZ); try { const cu = JSON.parse(st.custom || '[]'); cu.forEach(p => { if (!CUSTOM.some(c => c[0] === p[0])) CUSTOM.push(p); }); LS.set(K_CUS, CUSTOM); } catch (e) { } }
+    let legacy = []; if (st) { SZ = { ...SZ, ...(st.sizes || {}) }; LS.set(K_SZ, SZ); try { legacy = JSON.parse(st.custom || '[]'); } catch (e) { } }
+    await syncLib(legacy); watchLib();
     await AI.onLogin();
     // 지금 화면이 손대지 않은 예시 방이거나 없어졌으면 → 클라우드에서 가장 최근에 저장한 프로젝트 열기
     const cp = PROJ[projName], pristine = !cp || (!cp.dirty && cp.ct === undefined);
@@ -1025,6 +1026,8 @@ function multiPanel(b) {
     h('h4', {}, '복제'),
     h('div', { class: 'r' }, BTN('복제 (Ctrl+D)', () => dupMulti(list), 'b')),
     h('div', { class: 'r mgap' }, h('span', { class: 'sm' }, '배열 복제'), an, h('span', { class: 'sm' }, '세트 ·'), ax, h('span', { class: 'sm' }, '간격'), ag, h('span', { class: 'sm' }, 'cm'), BTN('만들기', () => dupMulti(list, clamp(+an.value || 1, 1, 30), ax.value, +ag.value || 0), 'o')),
+    h('h4', {}, '내 가구로 저장'),
+    h('div', { class: 'r' }, BTN(`💾 ${list.length}개 내 가구로 저장…`, () => saveLibDialog(list.map(o => ({ it: o, name: o.name }))), 'o')),
     h('h4', {}, '색·재질 일괄'),
     h('div', { class: 'r' }, h('label', { class: 'mcol' }, '주 색상 ', col), mat),
     h('h4', {}, '삭제'),
@@ -1405,24 +1408,146 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => { showT
 
 // 카탈로그
 const openCats = LS.get('room3d.v2.opencats', { '거실': 1, '침실': 1 });
+// ---------- 내 라이브러리: 내가 저장한 가구·사람 + 카테고리 (클라우드 users/{uid}/meta/library) ----------
+// CUSTOM 항목: [이름, w, d, h, color, type, ex]  · ex.cat = 'my' | 'u…'(내가 만든 카테고리) | 'b:거실'(기본 카테고리)
+const K_LIB = 'room3d.v2.lib', K_LASTCAT = 'room3d.v2.lastcat';
+let LIB = Object.assign({ cats: [], ren: {}, t: 0 }, LS.get(K_LIB, {}));
+function libNorm() { if (!Array.isArray(LIB.cats)) LIB.cats = []; if (!LIB.cats.some(c => c.id === 'my')) LIB.cats.unshift({ id: 'my', name: '내 가구' }); if (!LIB.ren || typeof LIB.ren !== 'object') LIB.ren = {}; }
+libNorm();
+const catOf = p => (p && p[6] && p[6].cat) || 'my';
+const bName = c => LIB.ren[c] || c;
+const catName = id => id && id.startsWith('b:') ? bName(id.slice(2)) : ((LIB.cats.find(c => c.id === id) || {}).name || '내 가구');
+const catExists = id => id && (id.startsWith('b:') ? CAT.some(c => c[0] === id.slice(2)) : LIB.cats.some(c => c.id === id));
+const catOpts = () => [...LIB.cats.map(c => [c.id, '📁 ' + c.name]), ...CAT.map(([c]) => ['b:' + c, bName(c) + ' (기본)'])];
+let libCT = null;
+function libChanged(quiet) { LIB.t = Date.now(); LS.set(K_LIB, LIB); LS.set(K_CUS, CUSTOM); renderCatalog(); if (!quiet) libCloudSoon(); }
+function libCloudSoon() { if (!Cloud.user) return; clearTimeout(libCT); libCT = setTimeout(() => Cloud.setMeta('library', { custom: JSON.stringify(CUSTOM), cats: JSON.stringify(LIB.cats), ren: JSON.stringify(LIB.ren), libT: LIB.t, dev: DEV }).then(() => { if (syncState !== 'err') setSync('ok'); }).catch(e => setSync('err', e.message)), 700); }
+function applyRemoteLib(d) {
+  if (!d || !d.libT || d.libT <= (LIB.t || 0)) return false;
+  try { CUSTOM = JSON.parse(d.custom || '[]'); LIB.cats = JSON.parse(d.cats || '[]'); LIB.ren = JSON.parse(d.ren || '{}'); } catch (e) { return false; }
+  libNorm(); LIB.t = d.libT; LS.set(K_LIB, LIB); LS.set(K_CUS, CUSTOM); renderCatalog(); return true;
+}
+// 로그인 시: 더 최근에 바꾼 쪽이 원본 (삭제·이름 변경도 그대로 반영)
+async function syncLib(legacyCustom) {
+  const d = await Cloud.getMeta('library');
+  if (d && d.libT) { if (d.libT > (LIB.t || 0)) applyRemoteLib(d); else if ((LIB.t || 0) > d.libT) libCloudSoon(); return; }
+  // 예전 버전(설정 문서에 custom만 있던 때) → 합쳐서 새 라이브러리로 올림
+  (legacyCustom || []).forEach(p => { if (!CUSTOM.some(c => c[0] === p[0])) CUSTOM.push(p); });
+  LIB.t = Date.now(); LS.set(K_LIB, LIB); LS.set(K_CUS, CUSTOM); renderCatalog(); libCloudSoon();
+}
+let unwatchLib = null;
+function watchLib() { if (unwatchLib) unwatchLib(); unwatchLib = Cloud.watchMeta ? Cloud.watchMeta('library', d => { if (d && d.dev !== DEV && applyRemoteLib(d)) toast('☁ 다른 기기에서 바꾼 내 가구·카테고리를 반영했습니다', 3500); }) : null; }
+const uniqLib = (n, except) => { let k = n, i = 2; while (CUSTOM.some(p => p[0] === k && p !== except)) k = `${n} (${i++})`; return k; };
+function newCat(name) { name = (name || '').trim(); if (!name) return null; const ex = LIB.cats.find(c => c.name === name); if (ex) return ex.id; const id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); LIB.cats.push({ id, name }); return id; }
+const EXK = ['c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'price', 'memo'];
+// 간단한 창 (aiui 의 모달과 같은 모양)
+function mdl(title, body) {
+  const bg = h('div', { class: 'mdl' }), box = h('div', { class: 'mdl-box' }), close = () => bg.remove();
+  box.append(h('div', { class: 'mdl-h' }, h('b', {}, title), h('button', { class: 'x', onclick: close, 'aria-label': '닫기' }, '×')), h('div', { class: 'mdl-b' }, body));
+  bg.append(box); bg.addEventListener('click', e => { if (e.target === bg) close(); }); document.body.append(bg); return { close, box };
+}
+// 카테고리 고르기 (기존 · 새로 만들기)
+function catPicker(def) {
+  const s = h('select', {}, catOpts().map(([v, t]) => h('option', { value: v }, t)), h('option', { value: '__new' }, '＋ 새 카테고리 만들기…'));
+  const nn = h('input', { type: 'text', placeholder: '새 카테고리 이름 (예: 웨딩 소품, 우리집 가구)', hidden: true });
+  s.value = catExists(def) ? def : 'my'; s.onchange = () => { nn.hidden = s.value !== '__new'; if (!nn.hidden) nn.focus(); };
+  const el = h('div', { class: 'catpick' }, s, nn);
+  return { el, get: () => s.value === '__new' ? newCat(nn.value) : s.value, setNew: () => { s.value = '__new'; nn.hidden = false; } };
+}
+// 내 가구로 저장: entries = [{ it, name }] (사진 인식 결과 여러 개도 한 번에)
+function saveLibDialog(entries, def) {
+  entries = entries.filter(e => e && e.it); if (!entries.length) return;
+  const body = h('div', {}), names = entries.map(e => h('input', { type: 'text', value: e.name || e.it.name || '내 가구' }));
+  const cp = catPicker(def || LS.get(K_LASTCAT, 'my')), ow = h('input', { type: 'checkbox' });
+  app(body,
+    h('p', { class: 'mu sm' }, entries.length > 1 ? `${entries.length}개를 한 카테고리에 저장합니다. 이름은 바꿔도 됩니다.` : '카탈로그에 저장해 두면 다음부터 버튼 하나로 추가됩니다.'),
+    F('카테고리', cp.el),
+    h('div', { class: 'svl' }, entries.map((e, i) => h('div', { class: 'svr' }, h('i', { style: `background:${e.it.color || '#999'}` }), names[i], h('small', {}, `${rd(e.it.w)}×${rd(e.it.d)}×${rd(e.it.h)}`)))),
+    h('label', { class: 'ck' }, ow, ' 같은 이름이 있으면 덮어쓰기 (끄면 “이름 (2)”로 따로 저장)'),
+    h('div', { class: 'r' }, BTN('저장', () => {
+      const cat = cp.get(); if (!cat) return toast('새 카테고리 이름을 입력하세요');
+      entries.forEach((e, i) => {
+        const it = e.it, raw = names[i].value.trim() || it.name || '내 가구', old = CUSTOM.find(p => p[0] === raw);
+        const n = old && ow.checked ? raw : uniqLib(raw); const ex = { cat }; EXK.forEach(k => { if (it[k] != null) ex[k] = it[k]; });
+        if (old && ow.checked) CUSTOM = CUSTOM.filter(p => p !== old);
+        CUSTOM.push([n, r1(it.w), r1(it.d), r1(it.h), it.color, it.type, ex]);
+      });
+      LS.set(K_LASTCAT, cat); openCats['c:' + cat] = 1; LS.set('room3d.v2.opencats', openCats); libChanged(); m.close();
+      toast(`${entries.length}개를 '${catName(cat)}' 카테고리에 저장했습니다`, 3500);
+    }, 'b'), BTN('취소', () => m.close())));
+  const m = mdl(entries.length > 1 ? `💾 ${entries.length}개 내 가구로 저장` : '💾 내 가구로 저장', body);
+  return m;
+}
+// 저장한 항목 편집 (이름 · 카테고리 · 삭제)
+function libItemDialog(p) {
+  const body = h('div', {}), nm = h('input', { type: 'text', value: p[0] }), cp = catPicker(catOf(p));
+  app(body, F('이름', nm), F('카테고리', cp.el), h('p', { class: 'mu sm' }, `기본 크기 ${p[1]}×${p[2]}×${p[3]}cm`),
+    h('div', { class: 'r' }, BTN('저장', () => {
+      const cat = cp.get(); if (!cat) return toast('새 카테고리 이름을 입력하세요');
+      const n = uniqLib(nm.value.trim() || p[0], p);
+      if (n !== p[0]) { const ok = 'my|' + p[0], nk = 'my|' + n; if (SZ[ok]) { SZ[nk] = SZ[ok]; delete SZ[ok]; LS.set(K_SZ, SZ); cloudSettingsSoon(); } RECENT = RECENT.map(r => r === ok ? nk : r); LS.set(K_REC, RECENT); items.forEach(i => { if (i.pk === ok) i.pk = nk; }); }
+      p[0] = n; p[6] = { ...(p[6] || {}), cat }; libChanged(); m.close(); toast('바꿨습니다');
+    }, 'b'), BTN('🗑 삭제', () => { if (!confirm(`'${p[0]}'을(를) 삭제할까요?`)) return; CUSTOM = CUSTOM.filter(c => c !== p); libChanged(); m.close(); }, 'o danger'), BTN('닫기', () => m.close())));
+  const m = mdl('✎ ' + p[0], body);
+}
+// 카테고리 관리 (이름 변경 · 순서 · 추가 · 삭제)
+function catManager() {
+  const body = h('div', {}); let m;
+  const draw = () => {
+    body.innerHTML = '';
+    const cnt = id => CUSTOM.filter(p => catOf(p) === id).length;
+    const nn = h('input', { type: 'text', placeholder: '새 카테고리 이름' });
+    const add = () => { const id = newCat(nn.value); if (!id) return toast('이름을 입력하세요'); openCats['c:' + id] = 1; libChanged(); draw(); toast(`'${catName(id)}' 카테고리를 만들었습니다`); };
+    nn.onkeydown = e => { if (e.key === 'Enter') add(); };
+    app(body,
+      h('h4', {}, '내 카테고리'),
+      h('div', { class: 'catl' }, LIB.cats.map((c, i) => {
+        const inp = h('input', { type: 'text', value: c.name }); inp.onchange = () => { const v = inp.value.trim(); if (!v) { inp.value = c.name; return; } c.name = v; libChanged(); };
+        return h('div', { class: 'catr' }, h('span', { class: 'cn' }, cnt(c.id)), inp,
+          BTN('↑', () => { if (i < 1) return; [LIB.cats[i - 1], LIB.cats[i]] = [LIB.cats[i], LIB.cats[i - 1]]; libChanged(); draw(); }, 'c', '위로'),
+          BTN('↓', () => { if (i >= LIB.cats.length - 1) return; [LIB.cats[i + 1], LIB.cats[i]] = [LIB.cats[i], LIB.cats[i + 1]]; libChanged(); draw(); }, 'c', '아래로'),
+          c.id === 'my' ? h('span', { class: 'mu sm', title: '기본 보관함이라 삭제할 수 없습니다 (이름은 변경 가능)' }, '기본') : BTN('🗑', () => {
+            const n = cnt(c.id), mode = n ? prompt(`'${c.name}' 카테고리에 ${n}개가 있습니다.\n1 = 항목은 '${catName('my')}'(으)로 옮기고 카테고리만 삭제\n2 = 항목까지 모두 삭제`, '1') : '1';
+            if (mode !== '1' && mode !== '2') return;
+            if (mode === '2' && !confirm(`${n}개 항목까지 모두 삭제합니다. 계속할까요?`)) return;
+            CUSTOM = mode === '2' ? CUSTOM.filter(p => catOf(p) !== c.id) : CUSTOM.map(p => { if (catOf(p) === c.id) p[6] = { ...(p[6] || {}), cat: 'my' }; return p; });
+            LIB.cats = LIB.cats.filter(x => x !== c); libChanged(); draw(); toast(`'${c.name}' 카테고리를 삭제했습니다`);
+          }, 'c danger', '카테고리 삭제'));
+      })),
+      h('div', { class: 'r' }, nn, BTN('＋ 추가', add, 'b')),
+      h('h4', {}, '기본 카테고리 이름'),
+      h('p', { class: 'mu sm' }, '보이는 이름만 바뀝니다. 내가 저장한 항목을 기본 카테고리에 넣을 수도 있습니다.'),
+      h('div', { class: 'catl' }, CAT.map(([c, ls]) => {
+        const inp = h('input', { type: 'text', value: bName(c), placeholder: c }); inp.onchange = () => { const v = inp.value.trim(); if (!v || v === c) delete LIB.ren[c]; else LIB.ren[c] = v; libChanged(); draw(); };
+        return h('div', { class: 'catr' }, h('span', { class: 'cn' }, ls.length + cnt('b:' + c)), inp, LIB.ren[c] ? BTN('↺', () => { delete LIB.ren[c]; libChanged(); draw(); }, 'c', `원래 이름(${c})으로`) : h('span'));
+      })),
+      h('p', { class: 'mu sm' }, Cloud.user ? '☁ 바꾼 내용은 클라우드에 바로 저장되어 다른 기기에도 반영됩니다.' : '로그인하면 카테고리와 내 가구가 클라우드에 저장됩니다.'));
+  };
+  draw(); m = mdl('📁 카테고리 관리', body);
+}
+
 function renderCatalog() {
   const q = $('q').value.trim().toLowerCase(), box = $('pre'); box.innerHTML = '';
-  const cats = [];
-  if (CUSTOM.length) cats.push(['내 가구', CUSTOM.map(p => ({ p, pk: 'my|' + p[0], my: 1 }))]);
-  if (!q && RECENT.length) { const r = RECENT.map(findPreset).filter(Boolean); if (r.length) cats.push(['최근 사용', r]); }
-  CAT.forEach(([c, ls]) => cats.push([c, ls.map(p => ({ p, pk: c + '|' + p[0] }))]));
+  const cats = [], mine = id => CUSTOM.filter(p => catOf(p) === id || (id === 'my' && !catExists(catOf(p)))).map(p => ({ p, pk: 'my|' + p[0], my: 1 }));
+  box.append(h('div', { class: 'r cattb' }, BTN('📁 카테고리 관리', catManager, 'c'), CUSTOM.length ? h('span', { class: 'mu sm' }, `내가 저장한 항목 ${CUSTOM.length}개 · 칩의 ✎로 이름·카테고리 변경`) : h('span', { class: 'mu sm' }, '사진 인식 결과나 선택한 가구를 「내 가구로 저장」하면 여기에 모입니다')));
+  LIB.cats.forEach(c => { const ls = mine(c.id); if (ls.length || c.id !== 'my') cats.push([c.name, ls, 'c:' + c.id, c.id]); });
+  if (!q && RECENT.length) { const r = RECENT.map(findPreset).filter(Boolean); if (r.length) cats.push(['최근 사용', r, '최근 사용']); }
+  CAT.forEach(([c, ls]) => cats.push([bName(c), [...mine('b:' + c), ...ls.map(p => ({ p, pk: c + '|' + p[0] }))], c, 'b:' + c]));
   let any = false;
-  cats.forEach(([c, ls]) => {
-    const f = q ? ls.filter(x => x.p[0].toLowerCase().includes(q) || c.includes(q) || (TYPES[x.p[5]] || '').includes(q)) : ls;
-    if (!f.length) return; any = true;
-    const det = h('details', { open: !!(q || openCats[c] || c === '최근 사용' || c === '내 가구') }, h('summary', {}, c, h('small', {}, ` ${f.length}`)));
-    det.ontoggle = () => { openCats[c] = det.open ? 1 : 0; LS.set('room3d.v2.opencats', openCats); };
+  cats.forEach(([c, ls, key, cid]) => {
+    const f = q ? ls.filter(x => x.p[0].toLowerCase().includes(q) || c.toLowerCase().includes(q) || (TYPES[x.p[5]] || '').includes(q)) : ls;
+    if (!f.length && (q || !cid || cid.startsWith('b:'))) return; any = true;
+    const userCat = cid && !cid.startsWith('b:');
+    const ren = BTN('✎', ev => { ev.preventDefault(); ev.stopPropagation(); const v = (prompt('카테고리 이름', c) || '').trim(); if (!v || v === c) return; if (userCat) LIB.cats.find(x => x.id === cid).name = v; else LIB.ren[cid.slice(2)] = v; libChanged(); }, 'cbtn', '카테고리 이름 바꾸기');
+    const det = h('details', { open: !!(q || openCats[key] || c === '최근 사용' || (userCat && openCats[key] !== 0)) }, h('summary', {}, (userCat ? '📁 ' : '') + c, h('small', {}, ` ${f.length}`), cid ? ren : null));
+    det.ontoggle = () => { openCats[key] = det.open ? 1 : 0; LS.set('room3d.v2.opencats', openCats); };
+    if (!f.length) det.append(h('p', { class: 'mu sm' }, '비어 있습니다 — 「내 가구로 저장」할 때 이 카테고리를 고르세요.'));
     const d = h('div', { class: 'ch' });
     f.forEach(x => {
       const u = SZ[x.pk], p = x.p;
       const b = h('button', { class: 'c' + (u ? ' u' : ''), title: `기본 ${p[1]}×${p[2]}×${p[3]}cm` + (u ? `\n내 크기 ${u.w}×${u.d}×${u.h}cm (다음 추가 시 적용)` : '') }, p[0]);
       b.onclick = () => { addPreset(x.pk, p); if (mq.matches) setSheet('peek'); };
-      if (x.my) { const xx = h('span', { class: 'x', title: '내 가구에서 삭제' }, '×'); xx.onclick = ev => { ev.stopPropagation(); if (!confirm(`'${p[0]}'을(를) 내 가구에서 삭제할까요?`)) return; CUSTOM = CUSTOM.filter(c => c !== p); LS.set(K_CUS, CUSTOM); renderCatalog(); cloudSettingsSoon(); }; b.append(xx); }
+      if (x.my) { b.classList.add('my'); b.prepend('★ '); const xx = h('span', { class: 'x ed', title: '이름·카테고리 변경 / 삭제' }, '✎'); xx.onclick = ev => { ev.stopPropagation(); libItemDialog(p); }; b.append(xx); }
       d.append(b);
     });
     det.append(d); box.append(det);
@@ -1501,7 +1626,7 @@ function itemPanel(b, it) {
     (LAMPS.has(it.type) || it.lt) ? h('div', { class: 'keep' }, G(3, F('조명', bsel([['1', '켜짐'], ['0', '꺼짐']], () => it.on === false ? '0' : '1', v => { it.on = v === '1'; C2(); })), F('색온도', bsel(TEMPS, () => it.temp || 2900, v => { it.temp = +v; C2(); })), F('밝기', brange(() => it.lum ?? 0.8, v => { it.lum = v; C2(); }, 0, 2, 0.1)))) : null,
     h('h4', {}, '견적·메모'),
     h('div', { class: 'keep' }, G(3, F('가격 (원)', bnum(() => it.price || 0, v => { it.price = v; markList(); commitSoon(); }, { min: 0, step: 1000 })), F('메모', h('input', { type: 'text', value: it.memo || '', placeholder: '구매처, 모델명 등', oninput: e => { it.memo = e.target.value; commitSoon(); } }), 'c2'))),
-    h('div', { class: 'r keep' }, BTN('복제 (Ctrl+D)', dupSel), BTN('내 가구로 등록', () => saveCustom(it)), BTN('카메라 맞춤', focusSel)), h('div', { class: 'r' }, BTN('삭제 (Del)', delSel)),
+    h('div', { class: 'r keep' }, BTN('복제 (Ctrl+D)', dupSel), BTN('💾 내 가구로 저장…', () => saveCustom(it)), BTN('카메라 맞춤', focusSel)), h('div', { class: 'r' }, BTN('삭제 (Del)', delSel)),
   );
 }
 function personEditor(it, C2) {
@@ -1540,11 +1665,7 @@ function personEditor(it, C2) {
     G(3, psl('걷기 보폭', 'leg', -1, 1, 0.05, v => Math.round(v * 100) + ''), psl('고개 좌우', 'yaw', -70, 70, 1, deg), F('앉기', h('div', { class: 'cg' }, bchk('앉은 자세', () => it.sit ?? (POSES[it.pose] || POSES.stand)[1].sit, v => { it.sit = v ? 1 : 0; C2(); })))),
     h('p', { class: 'mu sm' }, '왼쪽·오른쪽은 사람 본인 기준입니다. 슬라이더를 끌면 3D에서 바로 바뀝니다.'));
 }
-function saveCustom(it, name) {
-  const n = name || prompt('카탈로그 \'내 가구\'에 등록할 이름', it.name); if (!n) return;
-  const ex = {}; ['c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit'].forEach(k => { if (it[k] != null) ex[k] = it[k]; });
-  CUSTOM = CUSTOM.filter(p => p[0] !== n); CUSTOM.push([n, it.w, it.d, it.h, it.color, it.type, ex]); LS.set(K_CUS, CUSTOM); renderCatalog(); cloudSettingsSoon(); toast(`'${n}'을(를) 내 가구에 등록했습니다`);
-}
+function saveCustom(it, name, def) { return saveLibDialog([{ it, name: name || it.name }], def); }
 function opPanel(b, o) {
   const RB = () => { clampOp(o); buildRoom(); check(); dims(); syncSel(); infoSel(); markList(); commitSoon(); };
   const isWin = o.kind === 'win', st = o.st, swing = SWING.has(st);
@@ -1846,13 +1967,14 @@ function renderFile() {
   syncSel();
 }
 function uniq(n) { n = n.trim(); if (!n) return ''; let k = n, i = 2; while (PROJ[k]) k = `${n} (${i++})`; return k; }
-function exportJSON() { flush(); saveFile(fname('배치.json'), JSON.stringify({ app: 'room3d', v: 3, name: projName, state: snap(), sizes: SZ, custom: CUSTOM }, null, 1), 'application/json'); }
+function exportJSON() { flush(); saveFile(fname('배치.json'), JSON.stringify({ app: 'room3d', v: 3, name: projName, state: snap(), sizes: SZ, custom: CUSTOM, cats: LIB.cats, ren: LIB.ren }, null, 1), 'application/json'); }
 function importJSON(t, fn) {
   let d; try { d = JSON.parse(t); } catch (e) { return toast('JSON 형식이 아닙니다'); }
   let st = d.state; if (!st && d.R && Array.isArray(d.items)) st = d.R.wz != null ? migrateV1(d) : d;
   if (!st) return toast('배치 파일이 아닙니다');
   if (d.sizes) { SZ = { ...SZ, ...d.sizes }; LS.set(K_SZ, SZ); }
-  if (Array.isArray(d.custom)) { d.custom.forEach(p => { if (!CUSTOM.some(c => c[0] === p[0])) CUSTOM.push(p); }); LS.set(K_CUS, CUSTOM); }
+  if (Array.isArray(d.cats)) d.cats.forEach(c => { if (c && c.id && !LIB.cats.some(x => x.id === c.id)) LIB.cats.push({ id: c.id, name: c.name }); });
+  if (Array.isArray(d.custom)) { d.custom.forEach(p => { if (!CUSTOM.some(c => c[0] === p[0])) CUSTOM.push(p); }); libChanged(); }
   const n = uniq(d.name || fn.replace(/\.json$/i, '') || '가져온 방'); openProject(n, st); renderCatalog(); renderFile(); cloudSettingsSoon(); toast(`'${n}'을(를) 불러왔습니다`);
 }
 
@@ -2000,7 +2122,7 @@ const API = {
   get items() { return items; }, get lights() { return LIGHTS; }, get ops() { return OPS; }, get R() { return R; }, get E() { return E; }, get sel() { return sel; }, get projName() { return projName; }, get night() { return !!PREF.night; },
   CAT, TYPES, MATS, LKIND, WIN_ST, DOOR_ST, SHAPES, COLSTY, OUTFITS, HAIRS, POSES, VIEWS, FLOORS,
   describe, runActions, captureView, planCanvas, shot3D, toast, saveFile, fname, showTab, setSheet, h, BTN, F, G, app, isMobile,
-  itemLabel, lightLabel, opLabel, grp, addPreset, placeNew, newItem, specToItem, saveCustom, renderCatalog, commit: () => commitSoon(0),
+  itemLabel, lightLabel, opLabel, grp, addPreset, placeNew, newItem, specToItem, saveCustom, saveLibDialog, renderCatalog, commit: () => commitSoon(0),
   applyRoomSpec(spec) {
     if (spec.W || spec.D) { if (spec.shape && SHAPES.some(x => x[0] === spec.shape)) { R.pts = shapePreset(spec.shape, +spec.W || R.W, +spec.D || R.D).pts; R.bul = {}; geo(); } else { R.pts = RECT(+spec.W || R.W, +spec.D || R.D); R.bul = {}; geo(); } }
     if (spec.H) R.H = +spec.H;
@@ -2011,7 +2133,7 @@ const API = {
   LS, cloudSettingsSoon, onLogin, renderFile, renderAccount,
 };
 const AI = initAI(API);
-window.__room3d = Object.defineProperties(Object.create(API), Object.getOwnPropertyDescriptors({ scene, THREE, get cam() { return cam; }, scr(x, y, z) { const v = new THREE.Vector3(x, y, z).project(cam), r = cv.getBoundingClientRect(); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; }, get SZ() { return SZ; }, addOp, addLight, setSel, view, undo, redo, setRoom: setRoomDim, applyShape, insertVertex, chamfer, drawPlan: planCanvas }));
+window.__room3d = Object.defineProperties(Object.create(API), Object.getOwnPropertyDescriptors({ scene, THREE, get cam() { return cam; }, scr(x, y, z) { const v = new THREE.Vector3(x, y, z).project(cam), r = cv.getBoundingClientRect(); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; }, get SZ() { return SZ; }, get LIB() { return LIB; }, get CUSTOM() { return CUSTOM; }, catManager, libItemDialog, addOp, addLight, setSel, view, undo, redo, setRoom: setRoomDim, applyShape, insertVertex, chamfer, drawPlan: planCanvas }));
 
 // ---------- 시작 ----------
 window.addEventListener('beforeunload', () => { flush(); cloudFlush(); });

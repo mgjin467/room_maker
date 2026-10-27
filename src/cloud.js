@@ -76,6 +76,7 @@ export const Cloud = {
   async saveProject(name, state, t, dev) { await setDoc(doc(db, 'users', user.uid, 'projects', pid(name)), { name, t: t || Date.now(), dev: dev || '', data: JSON.stringify(state) }); },
   async getProject(name) { const d = await getDoc(doc(db, 'users', user.uid, 'projects', pid(name))); return d.exists() ? d.data() : null; },
   // 다른 기기에서 저장하면 실시간으로 알려 줌
+  watchMeta(k, cb) { return onSnapshot(doc(db, 'users', user.uid, 'meta', k), d => cb(d.exists() ? d.data() : null), e => console.warn('watchMeta', e)); },
   watchProjects(cb) { return onSnapshot(collection(db, 'users', user.uid, 'projects'), snap => cb(snap.docChanges().map(c => ({ type: c.type, ...c.doc.data() }))), e => console.warn('watch', e)); },
   async deleteProject(name) { await deleteDoc(doc(db, 'users', user.uid, 'projects', pid(name))); },
   // 설정 / AI 키
