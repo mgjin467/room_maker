@@ -22,6 +22,7 @@ export const NOPT = {
 
 // 보조색 기본값
 export const DEFA = {
+  tree: '#4f7f3a', bush: '#4a7a3c', flowerbed: '#e86a92', parasol: '#d9d2c3', sunbed: '#f1ece2', tent: '#3d5a5b', campchair: '#2b2b2d', arch: '#f6efe0', grill: '#9aa0a6', campfire: '#ff8c42', postlamp: '#fff3d6', deck: '#a0714f', boat: '#f2f2f0', sign: '#f6efe0',
   plant: '#3f7a3a', bed: '#e9e4da', flamp: '#efe6d2', tripod: '#f1ead9', arcLamp: '#d8d3c8', mlamp: '#f6efe0',
   tlamp: '#f3eee4', uplight: '#f6efe0', lamp: '#f6efe0', frame: '#d98b5f', island: '#e7e4de', kitchen: '#e7e4de',
   mdesk: '#2b2b2d', barstool: '#a0714f', catTower: '#cfc6b8', petHouse: '#c96f4a', hanger: '#a7b3c4',
@@ -43,8 +44,10 @@ export const TYPES = {
   uplight: '업라이트 스탠드', plant: '식물·화분', vase: '꽃병·오브제', basket: '바구니', books: '책 더미', rug: '러그',
   rugR: '원형 러그', curtainI: '커튼', frame: '액자', mirrorR: '원형 거울', mirrorF: '전신 거울', clock: '벽시계',
   screen: '접이식 파티션', catTower: '캣타워', petHouse: '펫 하우스', mshelf: '메탈 프레임 선반장', person: '사람',
+  tree: '나무 (야외)', bush: '관목·덤불', rock: '바위·돌', flowerbed: '꽃밭·화단', parasol: '파라솔', sunbed: '선베드', tent: '텐트', campchair: '캠핑 의자', picnic: '피크닉 테이블', fence: '울타리', arch: '아치 (웨딩·정원)', grill: '바비큐 그릴', campfire: '모닥불', postlamp: '가로등·정원등', deck: '데크·단상', surf: '서핑보드', boat: '보트·카약', sign: '안내판·이젤',
 };
 
+export const TREES = [['broad', '활엽수 (둥근 수형)'], ['pine', '소나무·침엽수'], ['palm', '야자수'], ['birch', '자작나무'], ['cherry', '벚나무 (꽃)'], ['maple', '단풍나무'], ['cypress', '측백·사이프러스']];
 export const PV = [
   ['monstera', '몬스테라'], ['leafy', '관엽 (일반)'], ['fiddle', '떡갈 고무나무'], ['bird', '여인초·극락조'],
   ['tree', '나무형 (올리브·뱅갈)'], ['palm', '야자류'], ['fern', '고사리'], ['dracaena', '행운목'], ['stucky', '스투키'],
@@ -53,7 +56,7 @@ export const PV = [
 ];
 
 // 조명이 나오는 모델 (스탠드 등)
-export const LAMPS = new Set(['lamp', 'flamp', 'arcLamp', 'tripod', 'mlamp', 'tlamp', 'uplight']);
+export const LAMPS = new Set(['lamp', 'flamp', 'arcLamp', 'tripod', 'mlamp', 'tlamp', 'uplight', 'campfire', 'postlamp']);
 
 let P, LP, CTX;
 const B = (x, y, z, w, h, d, c, o) => P.push({ g: 'b', x, y, z, w, h, d, c, ...o });
@@ -509,9 +512,49 @@ const BUILD = {
     B(-w / 4, bh + (h - bh) / 2 - 1.5, 0, rw, 3, d + 4, 'a', { rz: ra }); B(w / 4, bh + (h - bh) / 2 - 1.5, 0, rw, 3, d + 4, 'a', { rz: -ra });
     Disc(0, bh * 0.45, d / 2 + 0.1, Math.min(bh * 0.35, w * 0.28), 0.3, 0x2b2420);
   },
+  // ---------- 야외·조경 ----------
+  tree: (it, w) => {
+    const { d, h } = it, v = it.pv || 'broad', r = rng((it.id || 1) * 13 + 5), m = Math.min(w, d), tr = Math.max(4, m * 0.045);
+    if (v === 'pine' || v === 'cypress') {
+      const th = h * (v === 'pine' ? 0.28 : 0.12); C(0, 0, 0, tr * 0.7, tr, th + h * 0.2, BARK, { seg: 10 });
+      const n = v === 'pine' ? 5 : 3; for (let i = 0; i < n; i++) { const y = th + (h - th) * i / n * 0.86, rr = (m / 2) * (v === 'pine' ? 1 - i / (n + 0.6) : 0.55 - i * 0.08); C(0, y, 0, rr * 0.12, rr, (h - th) / n * (v === 'pine' ? 1.5 : 2.6), 'a', { seg: 14, sz: d / w }); }
+      return;
+    }
+    if (v === 'palm') {
+      let x = 0, y = 0; const n = 7, lean = (r() - 0.5) * 0.5, seg = h * 0.82 / n;
+      for (let i = 0; i < n; i++) { const nx = x + lean * seg * (i / n) * 0.9; Stick(x, y, 0, nx, y + seg, 0, tr * (1.1 - i * 0.05), tr * (1.05 - i * 0.05), BARK); x = nx; y += seg; }
+      for (let i = 0; i < 9; i++) { const a = i * 2 * PI / 9 + r() * 0.3, L = m * 0.55, e = -0.25 - r() * 0.35; S(x + Math.cos(a) * L * 0.45, y + Math.sin(e) * L * 0.4, Math.sin(a) * L * 0.45, 1, 'a', { sx: L / 2, sy: 0.8, sz: L * 0.11, ry: -a, rz: e, ws: 10, hs: 6 }); }
+      S(x, y, 0, tr * 1.4, 0x7a5a3a); return;
+    }
+    const th = h * (v === 'birch' ? 0.5 : 0.38), bark = v === 'birch' ? 0xe9e5dc : BARK;
+    C(0, 0, 0, tr * 0.75, tr * 1.1, th + h * 0.15, bark, { seg: 10 });
+    if (v === 'birch') for (let i = 0; i < 6; i++) B(0, th * (0.1 + i * 0.14), tr * 0.8, tr * 1.1, 1.2, 0.6, 0x2b2b2d);
+    const cr = m / 2, ch = h - th, n = v === 'cherry' || v === 'maple' ? 9 : 7;
+    for (let i = 0; i < n; i++) { const a = r() * PI * 2, rr = cr * (0.35 + r() * 0.3), px = Math.cos(a) * cr * 0.42, pz = Math.sin(a) * cr * 0.42 * (d / w), py = th + ch * (0.35 + r() * 0.35); S(px, py, pz, rr, i % 3 === 0 ? 'al' : i % 3 === 1 ? 'ad' : 'a', { sy: 0.8, ws: 12, hs: 9 }); }
+    S(0, th + ch * 0.6, 0, cr * 0.62, 'a', { sy: 0.85, sz: d / w, ws: 14, hs: 10 });
+  },
+  bush: (it, w) => { const { d, h } = it, r = rng((it.id || 1) * 3 + 1), n = Math.max(4, Math.round(w / 25)); for (let i = 0; i < n; i++) { const t = (i + 0.5) / n, rr = Math.min(h, d) * (0.42 + r() * 0.2); S(-w / 2 + w * t, rr * 0.75, (r() - 0.5) * d * 0.3, rr, i % 2 ? null : 'd', { sy: h / (rr * 2) * 0.95, ws: 12, hs: 9 }); } },
+  rock: (it, w) => { const { d, h } = it, r = rng((it.id || 1) * 17 + 3), n = 1 + Math.round(r() * 2); for (let i = 0; i < n; i++) { const s = i ? 0.45 + r() * 0.2 : 1; S((i ? (r() - 0.5) * w * 0.6 : 0), h * 0.42 * s, (i ? (r() - 0.5) * d * 0.5 : 0), w / 2 * s, i ? 'd' : null, { sy: (h / w) * 0.9, sz: d / w, ry: r() * 3, rz: (r() - 0.5) * 0.3, ws: 7, hs: 5 }); } },
+  flowerbed: (it, w) => { const { d, h } = it, r = rng((it.id || 1) * 5 + 2); B(0, 0, 0, w, Math.min(12, h * 0.4), d, 0x8a7a6a); B(0, Math.min(12, h * 0.4) - 1, 0, w - 4, 1.5, d - 4, 0x4a3a2a); const n = Math.round(w * d / 300); for (let i = 0; i < n; i++) { const x = (r() - 0.5) * (w - 10), z = (r() - 0.5) * (d - 10), sh = h * (0.5 + r() * 0.5); C(x, 10, z, 0.4, 0.5, sh - 10, STEM, { seg: 5 }); S(x, sh, z, 3 + r() * 2, r() < 0.7 ? null : FLOW[(r() * FLOW.length) | 0], { ws: 8, hs: 6 }); } },
+  parasol: (it, w) => { const { h } = it, rr = w / 2; C(0, 0, 0, Math.min(25, rr * 0.25), Math.min(28, rr * 0.28), 8, 'd', { seg: 20 }); C(0, 8, 0, 1.8, 1.8, h - 8, 0xd8d3c8, { seg: 10 }); C(0, h - rr * 0.32, 0, 2, rr, rr * 0.3, null, { seg: 8 }); C(0, h - rr * 0.32 - 4, 0, rr, rr, 4, 'd', { seg: 8, op: 0.9 }); },
+  sunbed: (it, w) => { const { d, h } = it, sh = Math.min(h * 0.55, 32); B(0, sh - 5, d * 0.12, w, 5, d * 0.72, 'a'); B(0, sh, d * 0.12, w - 4, 4, d * 0.7, null); B(0, sh + 2, -d * 0.36, w - 4, 4, d * 0.34, null, { rx: -0.85 }); Q4.forEach(([a, b]) => B(a * (w / 2 - 4), 0, b * (d / 2 - 8) + d * 0.08, 4, sh - 5, 4, 'a')); },
+  tent: (it, w) => { const { d, h } = it; S(0, 0, 0, w / 2, null, { sy: h / (w / 2), sz: d / w, tl: PI / 2, ws: 18, hs: 8 }); Disc(0, h * 0.32, d / 2 * 0.86, Math.min(w, h) * 0.24, 0.5, 'd', { sx: 1, sz: 1.5 }); B(0, 0, 0, w * 1.05, 0.6, d * 1.05, 0x2b2b2d, { op: 0.6 }); },
+  campchair: (it, w) => { const { d, h } = it, sh = h * 0.42; Stick(-w / 2 + 3, 0, d / 2 - 3, w / 2 - 3, sh, -d / 2 + 6, 1.1, 1.1, K); Stick(w / 2 - 3, 0, d / 2 - 3, -w / 2 + 3, sh, -d / 2 + 6, 1.1, 1.1, K); B(0, sh - 3, 0, w - 6, 3, d - 8, null, { rx: 0.08 }); B(0, sh, -d / 2 + 4, w - 6, h - sh, 2, null, { rx: -0.18 }); [1, -1].forEach(a => B(a * (w / 2 - 2), sh + 16, 0, 4, 2, d * 0.6, K)); },
+  picnic: (it, w) => { const { d, h } = it, PW = 0xb8865a; B(0, h - 4, 0, w, 4, d * 0.46, PW); [1, -1].forEach(b => { B(0, h * 0.58 - 3, b * d * 0.38, w, 3, d * 0.2, PW); [1, -1].forEach(a => { Stick(a * (w / 2 - 12), 0, b * d * 0.45, a * (w / 2 - 12), h - 4, b * d * 0.02, 2, 2, PW); }); }); },
+  fence: (it, w) => { const { d, h } = it, n = Math.max(2, Math.round(w / 90) + 1); for (let i = 0; i < n; i++) B(-w / 2 + (w - 6) * i / (n - 1) + 3, 0, 0, 6, h, Math.min(8, d), 'd'); [0.3, 0.75].forEach(t => B(0, h * t, 0, w, 6, Math.min(4, d), null)); const m = Math.max(3, Math.round(w / 14)); for (let i = 0; i < m; i++) B(-w / 2 + (i + 0.5) * w / m, 2, Math.min(4, d) / 2 + 0.8, 7, h * 0.92, 1.5, null); },
+  arch: (it, w) => { const { d, h } = it, r = w / 2 - 3, py = h - r; [1, -1].forEach(a => { B(a * r, 0, 0, 6, py, Math.min(d, 8), null); }); T(0, py, 0, r, 3, null, { arc: PI, ts: 32 }); const rr = rng((it.id || 1) * 9 + 4); for (let i = 0; i < 26; i++) { const t = rr(), ang = t * PI, x = Math.cos(ang) * r, y = py + Math.sin(ang) * r; S(x, y, (rr() - 0.5) * 6, 4 + rr() * 4, i % 3 ? 'a' : 0x4f6b34, { ws: 8, hs: 6 }); } [1, -1].forEach(a => { for (let i = 0; i < 6; i++) S(a * r + (rr() - 0.5) * 8, py * (0.2 + i * 0.13), (rr() - 0.5) * 6, 4 + rr() * 3, i % 2 ? 'a' : 0x4f6b34, { ws: 8, hs: 6 }); }); },
+  grill: (it, w) => { const { d, h } = it; Q4.forEach(([a, b]) => Stick(a * w * 0.3, 0, b * d * 0.3, a * w * 0.2, h * 0.6, b * d * 0.2, 1, 1, K)); S(0, h * 0.68, 0, w / 2, K, { sy: 0.55, sz: d / w, phs: 0, tl: PI }); S(0, h * 0.7, 0, w / 2 * 0.98, null, { sy: 0.5, sz: d / w, tl: PI / 2 }); C(0, h - 4, 0, 2, 2, 4, CH); },
+  campfire: (it, w) => { const { d, h } = it, r = rng(it.id || 1); for (let i = 0; i < 9; i++) { const a = i * 2 * PI / 9; S(Math.cos(a) * w * 0.42, 3, Math.sin(a) * d * 0.42, 5 + r() * 3, 0x8a8580, { sy: 0.7, ws: 7, hs: 5 }); } for (let i = 0; i < 5; i++) { const a = i * 2 * PI / 5; Stick(Math.cos(a) * w * 0.3, 1, Math.sin(a) * d * 0.3, 0, h * 0.35, 0, 2.5, 2, BARK); } C(0, 4, 0, 0.5, w * 0.18, h * 0.85, null, { em: 1, seg: 10 }); C(0, 4, 0, 0.5, w * 0.1, h * 0.6, 0xffd166, { em: 1, seg: 8 }); Lt(0, h * 0.4, 0); },
+  postlamp: (it, w) => { const { h } = it, m = Math.min(w, it.d); C(0, 0, 0, m * 0.35, m * 0.4, 6, K, { seg: 12 }); C(0, 6, 0, 2.2, 2.6, h - 30, K, { seg: 10 }); C(0, h - 26, 0, m * 0.3, m * 0.22, 22, null, { em: 1, op: 0.9, seg: 8 }); C(0, h - 4, 0, 1, m * 0.34, 5, K, { seg: 8 }); Lt(0, h - 15, 0); },
+  deck: (it, w) => { const { d, h } = it, n = Math.max(3, Math.round(d / 14)); B(0, 0, 0, w, Math.max(1, h - 3), d, 'd'); for (let i = 0; i < n; i++) B(0, Math.max(1, h - 3), -d / 2 + (i + 0.5) * d / n, w, 3, d / n - 0.8, i % 2 ? null : 'l'); },
+  surf: (it, w) => { const { d, h } = it; S(0, h / 2, 0, w / 2, null, { sx: 1, sy: (h / 2) / (w / 2), sz: (d / 2) / (w / 2), ws: 20, hs: 10 }); B(0, h * 0.5, 0, w * 0.04, h * 0.9, 0.4, 'a'); },
+  boat: (it, w) => { const { d, h } = it; S(0, h, 0, w / 2, null, { sy: h / (w / 2), sz: (d / 2) / (w / 2), phs: 0, ths: PI / 2, tl: PI / 2, ws: 24, hs: 10 }); B(0, h - 2, 0, w * 0.7, 2, d * 0.5, 'a'); B(0, h * 0.5, 0, w * 0.06, 2, d * 0.75, 'd'); },
+  sign: (it, w) => { const { d, h } = it; Stick(-w * 0.35, 0, d * 0.3, -w * 0.1, h, -d * 0.1, 1.2, 1.2, BARK); Stick(w * 0.35, 0, d * 0.3, w * 0.1, h, -d * 0.1, 1.2, 1.2, BARK); Stick(0, 0, -d * 0.4, 0, h, -d * 0.1, 1.2, 1.2, BARK); B(0, h * 0.42, d * 0.08, w * 0.95, h * 0.5, 1.5, null, { rx: -0.12 }); B(0, h * 0.4, d * 0.12, w * 0.98, 2, 3, BARK); },
 };
 
-export const OUTFITS = [['suit', '정장'], ['suit3', '쓰리피스 정장'], ['tux', '턱시도'], ['casual', '셔츠+바지'], ['tshirt', '티셔츠+반바지'], ['hoodie', '후드티'], ['knit', '니트+바지'], ['sport', '트레이닝복'], ['coat', '롱코트'], ['blouse', '블라우스+치마'], ['dress', '원피스'], ['longdress', '롱드레스'], ['gown', '웨딩드레스'], ['mermaid', '머메이드 드레스'], ['hanbok', '한복 (치마)'], ['hanbokM', '한복 (바지)']];
+export const OUTFITS = [['suit', '정장'], ['suit3', '쓰리피스 정장'], ['tux', '턱시도'], ['casual', '셔츠+바지'], ['tshirt', '티셔츠+반바지'], ['hoodie', '후드티'], ['knit', '니트+바지'], ['sport', '트레이닝복'], ['coat', '롱코트'], ['blouse', '블라우스+치마'], ['dress', '원피스'], ['longdress', '롱드레스'], ['gown', '웨딩드레스'], ['mermaid', '머메이드 드레스'], ['hanbok', '한복 (치마)'], ['hanbokM', '한복 (바지)'], ['beachM', '하와이안 셔츠+반바지'], ['tank', '민소매+반바지'], ['rash', '래쉬가드+보드숏'], ['swimF', '원피스 수영복'], ['apron', '앞치마 (작업복)'], ['blazer', '블레이저+슬랙스'], ['jeans', '티셔츠+청바지']];
+// 체형 프리셋: b=몸통 굵기 s=어깨 h=골반 a=팔·다리 굵기
+export const BODIES = { std: ['표준', { b: 1, s: 1, h: 1, a: 1 }], slim: ['마른', { b: 0.84, s: 0.93, h: 0.94, a: 0.84 }], muscle: ['근육질', { b: 1.1, s: 1.22, h: 0.98, a: 1.38 }], curvy: ['볼륨감 (글래머)', { b: 1.03, s: 1, h: 1.2, a: 1.02, bust: 1 }], plump: ['통통', { b: 1.3, s: 1.08, h: 1.18, a: 1.22 }], petite: ['아담', { b: 0.92, s: 0.95, h: 0.96, a: 0.9 }] };
 export const HAIRS = [['short', '짧은 머리'], ['crew', '스포츠'], ['part', '가르마'], ['twoblock', '투블럭'], ['pixie', '숏컷'], ['bob', '단발'], ['long', '긴 생머리'], ['wavy', '긴 웨이브'], ['pony', '포니테일'], ['bun', '올림머리'], ['lowbun', '낮은 쪽머리'], ['curly', '곱슬'], ['bald', '민머리']];
 export const SLEEVES = [['', '옷에 맞춤'], ['long', '긴팔'], ['short', '반팔'], ['none', '민소매']];
 export const TIES = [['', '옷에 맞춤'], ['none', '없음'], ['tie', '넥타이'], ['bow', '나비넥타이']];
@@ -530,18 +573,19 @@ export const POSES = {
   sitW: ['앉아서 손 흔들기', { aL: 22, aR: 140, zL: 15, zR: 60, eL: 55, eR: 35, leg: 0, sit: 1 }],
 };
 const SKIRTL = { blouse: 0.5, dress: 0.55, longdress: 0.97, gown: 1, mermaid: 1, hanbok: 1 };
-const PANTS = new Set(['suit', 'suit3', 'tux', 'casual', 'hoodie', 'knit', 'sport', 'coat', 'hanbokM']);
+const PANTS = new Set(['suit', 'suit3', 'tux', 'casual', 'hoodie', 'knit', 'sport', 'coat', 'hanbokM', 'apron', 'blazer', 'jeans']);
+const SHORTS = new Set(['tshirt', 'beachM', 'tank', 'rash']);
 function buildPerson(it) {
   const H = it.h, sex = it.sex || 'm', ch = sex === 'c', of = it.outfit || (sex === 'f' ? 'dress' : 'suit');
   const pz = (POSES[it.pose] || POSES.stand)[1], v = k => (it[k] ?? pz[k] ?? 0), sit = !!v('sit');
   const SK = it.skin || '#e8c4a2', HRc = it.hair || '#2a2220', SH = it.shoe || '#1d1d1f', TOP = null, BOT = 'a';
   const C3 = it.c3 || ({ suit3: '#8a7c66', hanbok: '#b23a48', sport: '#ffffff', hoodie: '#f2f2f2', hanbokM: '#6b5a45' }[of] || '#f7f7f5');
-  const bs = it.build || 1, shw = it.shw || 1, hs0 = it.headS || 1;
-  const hd = ch ? H / 6 : H / 7.6, hr = hd * 0.5 * hs0, sw = (sex === 'm' ? 0.125 : 0.11) * H * shw, hw = (sex === 'm' ? 0.085 : 0.095) * H * Math.sqrt(bs);
+  const BD = (BODIES[it.body] || BODIES.std)[1], bs = (it.build || 1) * BD.b, shw = (it.shw || 1) * BD.s, hs0 = it.headS || 1, am = BD.a;
+  const hd = ch ? H / 6 : H / 7.6, hr = hd * 0.5 * hs0, sw = (sex === 'm' ? 0.125 : 0.11) * H * shw, hw = (sex === 'm' ? 0.085 : 0.095) * H * Math.sqrt(bs) * BD.h;
   const hip0 = H * 0.52, dy = sit ? (H * 0.27 - hip0) : 0, hipY = hip0 + dy, shY = H * 0.815 + dy, topY = H + dy;
-  const lr = H * 0.034 * Math.sqrt(bs), lx = hw * 0.55, skirt = SKIRTL[of] != null, pants = PANTS.has(of), shorts = of === 'tshirt';
-  const slv = it.sleeve || ({ tshirt: 'short', gown: 'none', dress: 'short', mermaid: 'none', longdress: 'none' }[of] || 'long');
-  const tieT = it.tieT || ({ suit: 'tie', suit3: 'tie', coat: 'tie', tux: 'bow' }[of] || 'none');
+  const lr = H * 0.034 * Math.sqrt(bs) * (0.6 + 0.4 * am), lx = hw * 0.55, skirt = SKIRTL[of] != null, pants = PANTS.has(of), shorts = SHORTS.has(of);
+  const slv = it.sleeve || ({ tshirt: 'short', gown: 'none', dress: 'short', mermaid: 'none', longdress: 'none', beachM: 'short', tank: 'none', swimF: 'none', jeans: 'short', apron: 'short' }[of] || 'long');
+  const tieT = it.tieT || ({ suit: 'tie', suit3: 'tie', coat: 'tie', tux: 'bow' }[of] || 'none'), C3b = it.c3 || ({ apron: '#e8e1d3', beachM: '#f2c14e' }[of] || null);
   const skL = it.skirtL ?? SKIRTL[of] ?? 0.55, fullSkirt = skirt && skL >= 0.93;
   const zf = sw * 0.55 * bs;
   // 다리
@@ -581,6 +625,11 @@ function buildPerson(it) {
   if (of === 'knit') T(0, shY - 0.5, 0, sw * 0.32, H * 0.012, 'd', { rx: PI / 2, sz: 0.6 });
   if (of === 'hoodie') { T(0, shY + H * 0.005, -sw * 0.25, sw * 0.42, H * 0.03, TOP, { rx: PI / 2.4 }); B(0, hipY + H * 0.04, zf + 0.3, sw * 0.95, H * 0.08, 0.5, 'd'); [-1, 1].forEach(k => B(k * sw * 0.12, shY - H * 0.12, zf + 0.5, 0.5, H * 0.1, 0.4, C3)); }
   if (of === 'sport') B(0, hipY, zf + 0.3, 0.8, shY - hipY - 1, 0.4, C3);
+  if (BD.bust && sex === 'f') [-1, 1].forEach(k => S(k * sw * 0.32, shY - H * 0.11, zf * 0.55, H * 0.04, of === 'hanbok' ? 'a' : TOP, { sz: 0.8, ws: 12, hs: 10 }));
+  if (of === 'beachM') { for (let i = 0; i < 5; i++) S(0, shY - H * (0.05 + i * 0.05), zf + 0.4, H * 0.005, 'd'); for (let i = 0; i < 6; i++) B(((i % 3) - 1) * sw * 0.35, shY - H * (0.06 + Math.floor(i / 3) * 0.12), zf + 0.25, H * 0.03, H * 0.03, 0.3, C3b, { rz: 0.6 }); }
+  if (of === 'apron') { B(0, H * 0.36, zf + 0.7, sw * 1.2, shY - H * 0.36 - H * 0.04, 0.5, C3b); B(0, shY - H * 0.04, zf + 0.7, sw * 0.6, H * 0.012, 0.4, C3b); }
+  if (of === 'blazer') [-1, 1].forEach(k => B(k * sw * 0.27, shY - H * 0.22, zf + 0.6, sw * 0.16, H * 0.2, 0.4, 'd', { rz: k * 0.28 }));
+  if (of === 'swimF') { B(0, hipY - H * 0.02, 0, hw * 1.9, H * 0.05, zf * 1.4, TOP); }
   if (tieT === 'tie') { B(0, shY - H * 0.17, zf + 0.6, H * 0.016, H * 0.15, 0.5, it.tie || 0x1d1d1f); B(0, shY - H * 0.03, zf + 0.6, H * 0.022, H * 0.018, 0.6, it.tie || 0x1d1d1f); }
   if (tieT === 'bow') [-1, 1].forEach(k => B(k * H * 0.012, shY - H * 0.045, zf + 0.7, H * 0.022, H * 0.016, 0.8, it.tie || 0x1d1d1f, { rz: k * 0.35 }));
   // 팔
@@ -594,8 +643,9 @@ function buildPerson(it) {
     const fd = [ud[0] * Math.cos(eb) + pp[0] * Math.sin(eb), ud[1] * Math.cos(eb) + pp[1] * Math.sin(eb), ud[2] * Math.cos(eb) + pp[2] * Math.sin(eb)];
     const Hd = [El[0] + fd[0] * Lf, El[1] + fd[1] * Lf, El[2] + fd[2] * Lf]; hands.push(Hd);
     const upC = slv === 'none' || of === 'hanbok' && false ? SK : TOP, foC = slv === 'long' ? TOP : SK;
-    Stick(...S0, ...El, H * 0.03 * Math.sqrt(bs), H * 0.027 * Math.sqrt(bs), slv === 'none' ? SK : TOP);
-    Stick(...El, ...Hd, H * 0.027 * Math.sqrt(bs), H * 0.023 * Math.sqrt(bs), foC); void upC;
+    Stick(...S0, ...El, H * 0.03 * Math.sqrt(bs) * am, H * 0.027 * Math.sqrt(bs) * am, slv === 'none' ? SK : TOP);
+    Stick(...El, ...Hd, H * 0.027 * Math.sqrt(bs) * am, H * 0.023 * Math.sqrt(bs) * am, foC); void upC;
+    if (am > 1.25) S(S0[0] - k * 1, S0[1] - H * 0.01, 0, H * 0.04 * am * 0.85, slv === 'none' ? SK : TOP, { ws: 10, hs: 8 });
     S(Hd[0] + fd[0] * H * 0.018, Hd[1] + fd[1] * H * 0.018, Hd[2] + fd[2] * H * 0.018, H * 0.023, SK, { sy: 1.3 });
   });
   // 목·머리 (고개 회전)

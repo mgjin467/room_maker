@@ -3,6 +3,7 @@ import { PROVIDERS, TASKS, DEFAULT_MODELS, parseKeys, aiText, aiImage, parseJSON
 import { Cloud, parseCfg, saveCfg, loadCfg, RULES, cfgLink, cfgFileCode, BUILTIN } from './cloud.js';
 import qrcode from 'qrcode-generator';
 import { cropFace, centerBox, sampleSkin } from './faces.js';
+import { getRef, putRef, REF_KINDS, REF_EN } from './refs.js';
 
 const K_KEYS = 'room3d.v2.aikeys', K_MODELS = 'room3d.v2.aimodels', K_EXTRA = 'room3d.v2.aiextra', K_CHAT = 'room3d.v2.chat';
 const ASPECTS = [['1:1', 1], ['2:3', 2 / 3], ['3:2', 1.5], ['3:4', 0.75], ['4:3', 4 / 3], ['4:5', 0.8], ['5:4', 1.25], ['9:16', 9 / 16], ['16:9', 16 / 9], ['21:9', 21 / 9]];
@@ -100,6 +101,7 @@ actions 종류:
 열 패턴(cpat, 열마다 한 글자): \n${colList()}
 사람(person): sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, hs(머리) ${A.HAIRS.map(o => o[0]).join('|')}, bangs 앞머리 1/0, hair/skin/shoe/tie/c3 #hex, color=상의 c2=하의, sleeve long|short|none, tieT none|tie|bow, skirtL 0.3~1, pose ${Object.keys(A.POSES).join('|')} 또는 각도 aL/aR(팔 들기 -60~180) zL/zR(0앞~90옆) eL/eR(팔꿈치 0~150) leg(보폭 -1~1) yaw(고개 -70~70) sit 1/0, 체형 shw/build/headS(0.8~1.4), 얼굴사진 크기 fsz(0.5~1.45) fzoom(0.5~2.5) fox/foy(-0.4~0.4), glasses/flower/bouquet/veil 1/0. 기본 키 남180 여165 어린이120. 왼쪽/오른쪽 팔은 사람 본인 기준(L=본인 왼쪽).
 카탈로그(preset 이름으로 쓰면 크기·모양이 자동 적용):\n${catalogNames()}
+공간: 한 프로젝트에 여러 공간(방·야외)이 있습니다(상태의 space/spaces). 새 공간: {"op":"addSpace","kind":"room|outdoor","name":"","W":,"D":,"H":,"env":"${['field','mountain','forest','gravel','beach','lake','valley','sand','snow','garden','plaza','rooftop','deckyard','farm'].join('|')}"} · 이동: {"op":"switchSpace","name":"공간 이름"} · 야외 환경 변경: {"op":"room","set":{"env":"beach","gk":"grass|moss|gravel|sand|dune|snow|pavers|stone|concrete|deck|farm|soil","gc":"#hex","vtime":"day|cloudy|dawn|sunset|night"}}. 야외에는 창문·문이 없고 나무(tree, pv broad|pine|palm|birch|cherry|maple|cypress)·바위·파라솔·텐트·아치 등 야외·조경 카탈로그를 씁니다. 사람 체형 body: std|slim|muscle|curvy|plump|petite.
 잠금: 상태에서 lock:true 인 가구·창호·조명과 room.locked 인 방은 위치·크기·모양을 바꾸거나 삭제하지 마세요(조명 켜기·밝기·색온도, 문·창 열고 닫기, 커튼은 가능). 사용자가 잠금/고정을 요청하면 set에 "lock":1, 해제는 "lock":0 (방은 room set의 "lock").
 질문·분석(동선, 견적, 스타일 조언)만 요청하면 actions는 빈 배열. 모호하면 합리적으로 가정하고 reply에 밝히세요. 색은 반드시 #hex.`;
   }
@@ -112,8 +114,15 @@ actions 종류:
 열 패턴: \n${colList()}`;
   const PEOPLE_SYS = () => `사진 속 사람을 왼쪽부터 한 명씩 모두 찾아 3D 인물 모델 데이터로 만듭니다. 누구인지(신원·이름)는 추정하지 말고, 얼굴 위치와 외형(옷차림·색·머리·안경·소품)만 기록합니다. JSON 하나만:
 {"people":[{"label":"왼쪽 1번째 · 남성 정장","img":사진번호(0부터),"face_box":[ymin,xmin,ymax,xmax](얼굴 영역, 이마~턱·양 귀, 사진 크기 기준 0~1000 정규화 정수),"sex":"m|f|c","rel_height":사진속상대키(가장 큰 사람=1.0),"glasses":true|false,"tie":"#hex 넥타이색(없으면 생략)","flower":가슴꽃 여부,"bouquet":부케 여부,"outfit":"${A.OUTFITS.map(o => o[0]).join('|')}","top":"#hex 상의/드레스/저고리","bottom":"#hex 하의/치마","shoes":"#hex","skin":"#hex","hair":"#hex","hs":"short|long|bun|bob|bald","veil":true|false,"pose":"stand|sit"}]}`;
-  const ROOM_SYS = () => `방 사진 또는 평면도(도면) 이미지를 분석해 방 크기·창호·가구를 추출합니다. 치수가 표기되어 있으면(mm→cm) 사용, 없으면 일반적인 한국 아파트 기준으로 추정. JSON 하나만:
-{"room":{"W":가로,"D":깊이,"H":천장높이,"shape":"rect|L|Lr|T|U|cham|trap"},"openings":[{"kind":"win|door","st":"창:${A.WIN_ST.map(s => s[0]).join('|')} 문:${A.DOOR_ST.map(s => s[0]).join('|')}","wall":"벽1(뒷벽)|벽2(오른쪽)|벽3(앞벽)|벽4(왼쪽)","s":방안에서 벽을 볼때 왼쪽끝에서 창호중심,"w":,"h":,"y":}],"items":[{"name":"","type":"모델키","w":,"d":,"h":,"x":왼쪽에서중심,"z":뒤에서중심,"rot":0,"color":"#hex","mat":""}],"note":"추정 근거"}
+  const ROOM_SYS = () => `이미지(방 사진·인테리어 사진·평면도/도면·야외 풍경 사진)를 분석해 3D 공간 데이터로 바꿉니다. 여러 장이면 같은 공간의 다른 각도/도면으로 보고 합칩니다.
+치수: 도면에 숫자가 있으면 그대로(mm→cm), 없으면 사진 속 문(폭 90·높이 210), 사람, 가구, 바닥 타일 크기로 추정. 실내는 한국 아파트 기준 천장 230 내외.
+JSON 하나만:
+{"space":{"kind":"room|outdoor","name":"짧은 한국어 공간 이름","env":"(야외만) field|mountain|forest|gravel|beach|lake|valley|sand|snow|garden|plaza|rooftop|deckyard|farm","gk":"(야외 지면) grass|moss|gravel|sand|dune|snow|pavers|stone|concrete|deck|farm|soil","gc":"#hex 지면색","vtime":"day|cloudy|dawn|sunset|night"},
+"room":{"W":외곽 가로cm,"D":외곽 깊이cm,"H":천장높이(실내),"shape":"rect|L|Lr|T|U|cham|trap","pts":[[x,z],...] (직사각형이 아니면 위에서 본 꼭짓점 좌표 cm: 왼쪽 뒤 모서리가 (0,0), x=오른쪽, z=앞쪽, 시계방향),"fl":"(실내 바닥재) ${A.FLOORS.map(f => f[0]).join('|')}","flc":"#hex 바닥색","wc":"#hex 벽색","view":"창밖 풍경 ${A.VIEWS.map(v => v[0]).join('|')}"},
+"openings":[{"kind":"win|door","st":"창:${A.WIN_ST.map(s => s[0]).join('|')} 문:${A.DOOR_ST.map(s => s[0]).join('|')}","wall":"벽1(뒷벽)|벽2(오른쪽)|벽3(앞벽)|벽4(왼쪽)","s":방안에서 벽을 볼때 왼쪽끝에서 창호중심,"w":,"h":,"y":}],
+"items":[{"name":"","type":"모델키","w":,"d":,"h":,"x":왼쪽에서중심,"z":뒤에서중심,"rot":0,"color":"#hex","c2":"#hex","mat":"","pv":"식물/나무 종류","desc":"영어 외형 설명(짧게)"}],
+"desc":"실사 렌더용 영어 분위기 설명 (재질·조명·스타일·풍경; 60단어 이내)","note":"치수 근거와 추정 내용 (한국어)"}
+야외 사진이면 kind=outdoor 로 하고 나무(tree, pv broad|pine|palm|birch|cherry|maple|cypress)·바위(rock)·관목(bush)·파라솔·텐트·벤치·아치·데크 등을 items 로. 창호는 실내만.
 모델키: ${typeList()}`;
 
   // ---------- 대화 ----------
@@ -169,7 +178,7 @@ actions 종류:
     const chips = ['전체 조명 어둡게 해줘', '조명 모두 켜고 밝게', '야간 모드로 보여줘', '이 방 동선과 배치 문제점 분석해줘', '북유럽 스타일로 색과 재질 바꿔줘', '빈 공간에 어울리는 식물 2개 배치', '침대 옆에 협탁 추가', '가구 예상 가격 채워줘', '이 방을 아늑한 서재로 꾸며줘', '창밖 풍경을 바다 노을로'];
     app(b,
       h('div', { class: 'aitools' },
-        BTN('📷 사진으로 가구 추가', () => openPhoto('furniture'), 'b'), BTN('👤 사진에서 사람 추가', () => openPhoto('people'), 'o'), BTN('🏠 방·도면 사진 인식', () => openPhoto('room'), 'o'),
+        BTN('📷 사진으로 가구 추가', () => openPhoto('furniture'), 'b'), BTN('👤 사진에서 사람 추가', () => openPhoto('people'), 'o'), BTN('🏠 공간·도면·야외 인식', () => openPhoto('room'), 'o'),
         BTN('🎨 실사 이미지 만들기', () => openRender(), 'b'), BTN('🖼 갤러리', openGallery, 'o'), BTN('⚙ AI 설정', openSettings, 'o')),
       h('div', { class: 'mu sm' }, `대화 모델: ${PROVIDERS[m.provider]?.name} · ${m.model}`, m.key ? '' : ' — ⚠ 키 없음'),
       h('div', { id: 'chatlog', class: 'chatlog' }),
@@ -187,12 +196,12 @@ actions 종류:
     const body = h('div', {}), fi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }), cam = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
     const addFiles = async files => { for (const f of files) imgs.push(await fileToDataURL(f, 1800)); draw(); };
     fi.onchange = () => { addFiles(fi.files); fi.value = ''; }; cam.onchange = () => { addFiles(cam.files); cam.value = ''; };
-    const hint = { furniture: '상품 사진·상세페이지 캡처(치수표 포함)를 올리면 품목·사이즈·형태를 인식합니다. 여러 사이즈가 있으면 선택할 수 있습니다.', people: '사진 속 사람을 한 명씩 인식해 3D 사람 모델로 만듭니다 (기본 키: 남 180cm / 여 165cm).', room: '방 사진이나 평면도(도면)를 올리면 방 크기·창문·문·가구를 추정해 적용합니다.' };
+    const hint = { furniture: '상품 사진·상세페이지 캡처(치수표 포함)를 올리면 품목·사이즈·형태를 인식합니다. 여러 사이즈가 있으면 선택할 수 있습니다.', people: '사진 속 사람을 한 명씩 인식해 3D 사람 모델로 만듭니다 (기본 키: 남 180cm / 여 165cm).', room: '방·인테리어 사진, 평면도·도면(치수 표기), 야외 풍경 사진(들판·산·바다·자갈 등)을 올리면 공간 모양·치수·마감·환경·가구를 인식합니다. 지금 공간에 적용하거나 새 공간으로 추가할 수 있습니다.' };
     let ratio = false;
     const draw = () => {
       body.innerHTML = '';
       app(body,
-        h('div', { class: 'seg' }, [['furniture', '🪑 가구·소품'], ['people', '👤 사람'], ['room', '🏠 방·도면']].map(([k, n]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; result = null; draw(); } }, n))),
+        h('div', { class: 'seg' }, [['furniture', '🪑 가구·소품'], ['people', '👤 사람'], ['room', '🏠 공간·도면·야외']].map(([k, n]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; result = null; draw(); } }, n))),
         h('p', { class: 'mu sm' }, hint[mode]),
         h('div', { class: 'r' }, BTN('🖼 사진 선택', () => fi.click(), 'b'), A.isMobile() ? BTN('📸 카메라로 촬영', () => cam.click()) : null, fi, cam, imgs.length ? BTN('사진 모두 지우기', () => { imgs = []; result = null; draw(); }, 'c') : null),
         h('div', { class: 'attrow' }, imgs.map((s, i) => h('span', { class: 'att big' }, h('img', { src: s }), h('button', { class: 'x', onclick: () => { imgs.splice(i, 1); draw(); } }, '×')))),
@@ -206,7 +215,7 @@ actions 종류:
       const b = e.target; b.disabled = true; b.textContent = '인식 중… (10~40초)';
       try {
         const sys = mode === 'furniture' ? FURN_SYS() : mode === 'people' ? PEOPLE_SYS() : ROOM_SYS();
-        const out = await aiText({ ...m, system: sys, prompt: mode === 'furniture' ? '사진 속 가구/소품을 모두 추출하세요. 치수표를 꼼꼼히 읽으세요.' : mode === 'people' ? '사진 속 모든 사람을 왼쪽부터 추출하세요.' : '방/도면을 분석하세요.', images: imgs, json: true });
+        const out = await aiText({ ...m, system: sys, prompt: mode === 'furniture' ? '사진 속 가구/소품을 모두 추출하세요. 치수표를 꼼꼼히 읽으세요.' : mode === 'people' ? '사진 속 모든 사람을 왼쪽부터 추출하세요.' : '공간(실내/야외)·도면을 분석하세요. 치수 표기를 꼼꼼히 읽으세요.', images: imgs, json: true });
         result = parseJSON(out);
         if (mode === 'furniture') (result.items || []).forEach(it => { it._on = true; it._v = -1; });
         if (mode === 'people') { for (const p of (result.people || [])) { p._on = true; p._faceOn = true; p._adj = { dx: 0, dy: 0, s: 1 }; p.height = p.sex === 'f' ? 165 : p.sex === 'c' ? 120 : 180; const src = imgs[Math.min(imgs.length - 1, Math.max(0, p.img | 0))]; p._src = src; if (Array.isArray(p.face_box) && p.face_box.length === 4) { try { p.face = await cropFace(src, p.face_box, p._adj); p.skin = await sampleSkin(p.face); } catch (e) { } } } }
@@ -243,12 +252,22 @@ actions 종류:
             h('div', { class: 'r' }, BTN('배치에 추가', () => addPeople([p]), 'c'), BTN('💾 내 가구로 저장…', () => addPeople([p], true), 'c')))),
           h('div', { class: 'r' }, BTN('선택한 사람 모두 배치에 추가', () => addPeople(list.filter(x => x._on)), 'b'), BTN('💾 선택한 사람 내 가구로 저장…', () => addPeople(list.filter(x => x._on), true))));
       }
-      const r = result.room || {};
-      return h('div', {}, h('h3', {}, '인식된 방'), h('p', {}, `가로 ${r.W} · 깊이 ${r.D} · 높이 ${r.H || '-'} cm · 모양 ${r.shape || 'rect'}`),
-        h('p', { class: 'sm' }, `창호 ${(result.openings || []).length}개 · 가구 ${(result.items || []).length}개`), result.note ? h('p', { class: 'mu sm' }, result.note) : null,
-        h('div', { class: 'r' }, BTN('방 크기·창호 적용', () => { A.applyRoomSpec({ ...r, openings: result.openings }); toast('방에 적용했습니다'); }, 'b'), BTN('가구도 함께 추가', () => { A.applyRoomSpec({ ...r, openings: result.openings }); A.runActions((result.items || []).map(it => ({ op: 'add', item: it }))); toast('적용했습니다'); })));
+      const r = result.room || {}, sp = result.space || {}, out = sp.kind === 'outdoor', its = result.items || [], ops = out ? [] : (result.openings || []);
+      const opt = result._opt || (result._opt = { items: true, refs: true, ops: true });
+      const apply = async asNew => {
+        if (asNew) A.newSpace({ kind: out ? 'outdoor' : 'room', env: sp.env, W: r.W, D: r.D, H: r.H, name: sp.name });
+        A.applyRoomSpec({ ...r, ...(out ? { env: sp.env, gk: sp.gk, gc: sp.gc, vtime: sp.vtime, H: undefined } : {}), desc: result.desc, openings: !out && opt.ops ? ops : undefined });
+        if (opt.items && its.length) A.runActions(its.map(it => ({ op: 'add', item: it })));
+        if (opt.refs) { const R = A.R; R.refs = [...(R.refs || [])]; for (const im of imgs.slice(0, 4)) R.refs.push({ id: await putRef(await shrinkImg(im, 900)), kind: /도면|plan/i.test(result.note || '') ? 'layout' : 'style' }); A.commit(); A.renderRoom && A.renderRoom(); }
+        toast(asNew ? `＋ '${sp.name || '새 공간'}' 공간을 만들었습니다` : '지금 공간에 적용했습니다', 4000); m.close && m.close();
+      };
+      return h('div', {}, h('h3', {}, out ? `🌳 인식된 야외 공간 — ${sp.name || ''}` : `🏠 인식된 방 — ${sp.name || ''}`),
+        h('p', {}, out ? `환경 ${sp.env || '-'} · 지면 ${sp.gk || '-'} · 영역 ${r.W || '-'} × ${r.D || '-'} cm` : `가로 ${r.W} · 깊이 ${r.D} · 높이 ${r.H || '-'} cm · ${Array.isArray(r.pts) && r.pts.length > 2 ? `다각형 ${r.pts.length}꼭짓점` : '모양 ' + (r.shape || 'rect')}`),
+        h('p', { class: 'sm' }, `${out ? '' : `창호 ${ops.length}개 · `}가구·객체 ${its.length}개${result.desc ? ' · 분위기: ' + result.desc : ''}`), result.note ? h('p', { class: 'mu sm' }, result.note) : null,
+        h('div', { class: 'cg' }, h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: opt.items, onchange: e => { opt.items = e.target.checked; } }), `가구·객체 ${its.length}개도 배치`), !out ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: opt.ops, onchange: e => { opt.ops = e.target.checked; } }), `창문·문 ${ops.length}개 적용`) : null, h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: opt.refs, onchange: e => { opt.refs = e.target.checked; } }), '이 사진을 공간 참고 사진으로 저장 (실사 렌더에 반영)')),
+        h('div', { class: 'r' }, BTN('＋ 새 공간으로 만들기', () => apply(true), 'b'), BTN('지금 공간에 적용', () => { if (confirm('지금 공간의 모양·치수를 바꿉니다. 계속할까요?')) apply(false); }, 'o')));
     };
-    draw(); return modal('📷 사진으로 인식', body, { wide: true });
+    draw(); const m = modal('📷 사진으로 인식', body, { wide: true }); return m;
   }
   function addFurn(list, save) {
     if (!list.length) return toast('선택된 항목이 없습니다');
@@ -303,17 +322,22 @@ actions 종류:
 
   // ---------- 실사 렌더 ----------
   function sceneText(viewKey) {
-    const d = A.describe(), r = d.room, L = [];
+    const d = A.describe(), r = d.room, L = [], sp = d.space || {};
+    if (sp.kind === 'outdoor') {
+      L.push(`OUTDOOR scene (no walls, no ceiling): ${sp.envName || sp.env} environment. Usable site ${r.W}cm x ${r.D}cm (dashed boundary is only a guide — do NOT draw it). Ground: ${sp.ground || ''} (${sp.groundColor || ''}). Time/weather: ${sp.time}. Keep the surrounding scenery type (mountains/sea/forest/city etc.) as in the input.${sp.desc ? ' Look & feel: ' + sp.desc : ''}`);
+    } else {
     L.push(`Room: ${r.W}cm wide x ${r.D}cm deep, ceiling ${r.H}cm, ${r.shape === 'rect' ? 'rectangular' : 'custom-shaped (' + r.walls.length + ' walls' + (r.walls.some(w => w.curved) ? ', with curved wall' : '') + ')'}.`);
     L.push(`Floor: ${A.floorName(r.floor.type) || r.floor.type} (${r.floor.color}), plank/tile direction ${r.floor.dir}°. Walls: ${r.wallColor}${r.walls.some(w => w.color !== r.wallColor) ? ', accent walls ' + r.walls.filter(w => w.color !== r.wallColor).map(w => w.label + ' ' + w.color).join(', ') : ''}.`);
-    L.push(`Windows/doors: ${d.openings.map(o => `${o.label} ${o.stName} ${o.w}x${o.h}cm on ${o.wall}${o.kind === 'win' && o.curtain && o.curtain !== 'none' ? ' with ' + o.curtain : ''}${o.open ? ' (open ' + o.open + ')' : ''}`).join('; ') || 'none'}. View outside windows: ${r.outsideView}, ${r.viewTime === 'auto' ? (r.night ? 'night' : 'daytime') : r.viewTime}.`);
-    L.push('Furniture & objects (exact sizes, keep them): ' + d.items.map(i => `${i.name} [${A.TYPES[i.type] || i.type}] ${i.w}x${i.d}x${i.h}cm, color ${i.color}${i.c2 ? '/' + i.c2 : ''}${i.mat ? ', material ' + A.matName(i.mat) : ''}${i.mat2 ? '/' + A.matName(i.mat2) : ''}${i.type === 'person' ? `, a ${i.sex === 'f' ? 'woman' : i.sex === 'c' ? 'child' : 'man'} ${i.h}cm tall in ${i.outfit}` : ''}${i.on === false ? ', lamp OFF' : i.on ? `, lamp ON ${Math.round((i.lum ?? 0.8) * 100)}%` : ''}`).join('; ') + '.');
+    }
+    if (sp.kind !== 'outdoor') L.push(`Windows/doors: ${d.openings.map(o => `${o.label} ${o.stName} ${o.w}x${o.h}cm on ${o.wall}${o.kind === 'win' && o.curtain && o.curtain !== 'none' ? ' with ' + o.curtain : ''}${o.open ? ' (open ' + o.open + ')' : ''}`).join('; ') || 'none'}. View outside windows: ${r.outsideView}, ${r.viewTime === 'auto' ? (r.night ? 'night' : 'daytime') : r.viewTime}.`);
+    L.push('Furniture & objects (exact sizes, keep them): ' + d.items.map(i => `${i.desc ? '(' + i.desc + ') ' : ''}${i.name} [${A.TYPES[i.type] || i.type}] ${i.w}x${i.d}x${i.h}cm, color ${i.color}${i.c2 ? '/' + i.c2 : ''}${i.mat ? ', material ' + A.matName(i.mat) : ''}${i.mat2 ? '/' + A.matName(i.mat2) : ''}${i.type === 'person' ? `, a ${i.sex === 'f' ? 'woman' : i.sex === 'c' ? 'child' : 'man'} ${i.h}cm tall in ${i.outfit}` : ''}${i.on === false ? ', lamp OFF' : i.on ? `, lamp ON ${Math.round((i.lum ?? 0.8) * 100)}%` : ''}`).join('; ') + '.');
     L.push('Lighting fixtures: ' + (d.lights.map(l => `${l.kindName} ${l.on && l.lum > 0 ? `ON at ${Math.round(l.lum * 100)}% brightness, ${l.temp}K` : 'OFF (dark)'}`).join('; ') || 'none') + `. Overall: ${r.night ? 'NIGHT — room lit only by the listed lights that are ON; lights that are OFF must stay dark' : 'DAYTIME — natural light through windows plus listed lights'}.`);
     L.push(`Camera: ${{ cur: 'same as the input image', door: 'from the entrance looking in', iso: 'elevated three-quarter view', isoL: 'elevated three-quarter view from the left', top: 'top-down view', sel: 'close-up' }[viewKey] || 'eye-level from a corner of the room (150cm high)'}.`);
     return L.join('\n');
   }
   function renderPrompt(viewKey, o) {
-    return `Transform this 3D interior layout render into a single photorealistic interior photograph.
+    const out = (A.describe().space || {}).kind === 'outdoor';
+    return `Transform this 3D ${out ? 'outdoor scene layout' : 'interior layout'} render into a single photorealistic ${out ? 'outdoor' : 'interior'} photograph.
 STRICT RULES: keep the EXACT same camera angle, framing, perspective and room geometry; keep every piece of furniture, object, person, window and door in exactly the same position, size, proportion, shape, color and material as in the input; do not move, add or remove furniture${o.decor ? ' (you MAY add a few small decorative accessories like books, cushions, a throw, small vases)' : ' and do not add new objects'}. Replace simplified geometry with realistic real-world equivalents of the same design (e.g. a box labeled bookshelf becomes a real bookshelf of the same size). Respect the lighting state exactly: fixtures that are OFF stay dark, dimmed lights stay dim. Realistic global illumination, soft shadows, accurate materials, natural textures, 35mm lens look, high dynamic range, no text, no watermark, no people unless people are present in the input.
 ${STYLEP[o.style] || ''} ${o.extra || ''}
 SCENE DATA:
@@ -328,7 +352,9 @@ ${sceneText(viewKey)}`;
   function openRender(pre = {}) {
     const R = A.R, nCorner = Math.min(6, R.pts.length);
     const VIEWS = [['cur', '현재 화면'], ['door', '입구 시점'], ['iso', '대각선 (오른쪽)'], ['isoL', '대각선 (왼쪽)'], ['top', '위에서'], ...Array.from({ length: nCorner }, (_, i) => [`eye${i}`, `눈높이 · 모서리 ${i + 1}`]), ['sel', '선택 대상 클로즈업']];
-    const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high' };
+    const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high', useRefs: true, extraRefs: [] };
+    const nRefs = () => (A.R.refs || []).length + A.items.reduce((n, i) => n + (i.refUse === 0 ? 0 : (i.refs || []).length), 0);
+    const xfi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }); xfi.onchange = async () => { for (const f of xfi.files) st.extraRefs.push(await fileToDataURL(f, 1000, 0.85)); xfi.value = ''; draw(); };
     const body = h('div', {}), res = h('div', { class: 'rgrid' });
     const draw = () => {
       body.innerHTML = '';
@@ -343,7 +369,11 @@ ${sceneText(viewKey)}`;
           h('h4', {}, '스타일'),
           h('div', { class: 'ch' }, STYLES.map(([k, n]) => h('button', { class: 'c' + (st.style === k ? ' on' : ''), onclick: () => { st.style = k; draw(); } }, n))),
           F('추가 요청 (선택)', h('textarea', { rows: 2, placeholder: '예: 창밖에 비 오는 저녁, 벽에 은은한 간접조명 반사', oninput: e => { st.extra = e.target.value; } }, st.extra)),
-          h('div', { class: 'cg' }, h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.decor, onchange: e => { st.decor = e.target.checked; } }), '작은 소품(쿠션·책 등) 추가 허용')),
+          h('div', { class: 'cg' }, h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.decor, onchange: e => { st.decor = e.target.checked; } }), '작은 소품(쿠션·책 등) 추가 허용'),
+            h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.useRefs, onchange: e => { st.useRefs = e.target.checked; } }), `📎 가구·사람·공간에 붙인 참고 사진 반영 (${nRefs()}장)`)),
+          h('div', { class: 'r' }, BTN('📎 이번 렌더용 참고 사진 추가', () => xfi.click(), 'c'), xfi, st.extraRefs.length ? BTN(`참고 ${st.extraRefs.length}장 지우기`, () => { st.extraRefs = []; draw(); }, 'c') : null),
+          st.extraRefs.length ? h('div', { class: 'attrow' }, st.extraRefs.map(s => h('span', { class: 'att' }, h('img', { src: s })))) : null,
+          h('p', { class: 'mu sm' }, '참고 사진: 얼굴·옷·체형·자세(사람), 재질·모양(가구), 분위기(공간)를 실사 이미지에 맞춰 반영합니다. 선택 탭의 「📎 참고 사진」에서 객체마다 붙일 수 있습니다.'),
           F('이미지 모델', modelPicker('image', draw)),
           h('p', { class: 'mu sm' }, `${PROVIDERS[im.provider]?.name} · ${im.model}${im.key ? '' : ' — ⚠ 키 없음 (⚙ AI 설정)'} · 배치·크기·재질·조명 설정이 프롬프트에 그대로 들어갑니다.`)) : null,
         h('div', { class: 'r' }, BTN(st.ai ? '🎨 생성 시작' : '📷 캡처', go, 'b'), BTN('프롬프트 보기', () => modal('프롬프트', h('pre', { class: 'pre' }, renderPrompt([...st.views][0] || 'cur', st))), 'c')),
@@ -361,7 +391,7 @@ ${sceneText(viewKey)}`;
         try {
           const cap = A.captureView(vk, Math.round(W * (st.ai ? sc : 1)), Math.round(H * (st.ai ? sc : 1)));
           let out = cap;
-          if (st.ai) { card.querySelector('small').textContent = `${name} · AI 생성 중… (20~90초)`; const gen = await aiImage({ ...im, prompt: renderPrompt(vk, st), image: cap, aspect: asp, quality: st.quality }); out = await coverResize(gen, W, H); }
+          if (st.ai) { card.querySelector('small').textContent = `${name} · AI 생성 중… (20~90초)`; const rr = st.useRefs ? await collectRenderRefs(st.extraRefs.length ? 7 : 10) : { imgs: [], text: '' }; const xr = st.extraRefs.slice(0, 4), xt = xr.length ? ` Additional style reference images #${rr.imgs.length + 2}${xr.length > 1 ? '-#' + (rr.imgs.length + 1 + xr.length) : ''}: match their overall style, lighting and materials.` : ''; const gen = await aiImage({ ...im, prompt: renderPrompt(vk, st) + rr.text + xt, image: cap, refs: [...rr.imgs, ...xr], aspect: asp, quality: st.quality }); out = await coverResize(gen, W, H); }
           showResult(card, out, cap, name, W, H);
         } catch (e) { card.innerHTML = ''; card.append(h('p', { class: 'warn' }, `${name}: ${e.message}`)); }
       }
@@ -424,5 +454,47 @@ ${sceneText(viewKey)}`;
       saveLocal(); if (!document.getElementById('t-ai').hidden) render();
     } catch (e) { toast('AI 설정 동기화 실패: ' + e.message); }
   }
-  return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace, openLink, copyCfgFile };
+  const shrinkImg = (src, max) => new Promise(res => { const i = new Image(); i.onload = () => { const k = Math.min(1, max / Math.max(i.width, i.height)), c = document.createElement('canvas'); c.width = Math.round(i.width * k); c.height = Math.round(i.height * k); c.getContext('2d').drawImage(i, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.82)); }; i.onerror = () => res(src); i.src = src; });
+  // ---------- 참고 사진 → 3D 적용 ----------
+  const PERSON_KEYS = `sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, body(체형) std|slim|muscle|curvy|plump|petite, hs(머리) ${A.HAIRS.map(o => o[0]).join('|')}, bangs 1/0, hair/skin/shoe/tie/c3 #hex, color=상의 #hex, c2=하의 #hex, sleeve long|short|none, tieT none|tie|bow, skirtL 0.3~1, glasses/flower/bouquet/veil 1/0, pose ${Object.keys(A.POSES).join('|')} 또는 aL/aR(팔 들기 -60~180°) zL/zR(0앞~90옆) eL/eR(팔꿈치 0~150) leg(-1~1) yaw(고개 -70~70) sit 1/0, shw/build(0.8~1.4)`;
+  const REFSYS = (kind, cur) => kind === 'person'
+    ? `참고 사진(첨부 순서대로 용도가 적혀 있음)을 보고 3D 인물 모델 값을 정합니다. 사진 속 인물의 신원·이름은 절대 추정하지 않고 외형만 봅니다. 노출이 심한 옷차림은 가장 가까운 일상복·수영복 값으로 대신합니다. 지정된 용도의 사진에서만 그 항목을 가져오세요(예: '옷차림' 사진 → 옷·색, '자세' 사진 → 팔·다리 각도, '체형' 사진 → body/shw/build, '얼굴' 사진 → face_box·skin·glasses).
+JSON 하나만: {"set":{바꿀 값만 — ${PERSON_KEYS}},"face":{"img":얼굴 사진 번호(0부터),"face_box":[ymin,xmin,ymax,xmax](0~1000)} (얼굴 사진이 있을 때만),"desc":"실사 렌더용 영어 외형 설명 (옷 소재·색·스타일, 헤어, 체형, 자세 느낌; 신원 언급 금지, 60단어 이내)","note":"무엇을 반영했는지 한국어 한두 문장"}
+현재 값: ${JSON.stringify(cur)}`
+    : kind === 'space'
+      ? `참고 사진(인테리어·야외 풍경·도면)을 보고 이 공간의 마감·분위기를 정합니다. JSON 하나만:
+{"set":{실내면 "fl":"${A.FLOORS.map(f => f[0]).join('|')}","flc":"#hex 바닥색","wc":"#hex 벽색","bb":"#hex 걸레받이","view":"창밖 풍경 ${A.VIEWS.map(v => v[0]).join('|')}","vtime":"day|sunset|night" / 야외면 "env":"field|mountain|forest|gravel|beach|lake|valley|sand|snow|garden|plaza|rooftop|deckyard|farm","gk":"grass|moss|gravel|sand|dune|snow|pavers|stone|concrete|deck|farm|soil","gc":"#hex 지면색","vtime":"day|cloudy|dawn|sunset|night"},"desc":"실사 렌더용 영어 분위기 설명 (조명, 재질, 스타일, 색감; 60단어 이내)","note":"한국어 요약"}
+현재: ${JSON.stringify(cur)}`
+      : `참고 사진을 보고 3D 가구·소품 값을 정합니다. 치수는 사진·도면에 숫자가 보이거나 '치수·도면' 사진이 있을 때만 바꿉니다(mm→cm). JSON 하나만:
+{"set":{"type":"모델키 (모양이 확실히 다를 때만)","color":"#hex 주색","c2":"#hex 보조색","mat":"재질키","mat2":"보조 재질키","n":단수,"cpat":"열 패턴","pv":"식물·나무 종류","w":,"d":,"h":},"desc":"실사 렌더용 영어 외형 설명 (형태, 소재, 마감, 디테일; 60단어 이내)","note":"한국어 요약"}
+모델키: ${typeList()}
+재질키: ${A.MATS.map(m => m[0]).filter(Boolean).join(', ')}
+현재 값: ${JSON.stringify(cur)}`;
+  async function analyzeRefs(target, done) {
+    const isSpace = target === 'space', it = isSpace ? null : target, refs = (isSpace ? A.R.refs : it.refs) || [];
+    if (!refs.length) return toast('먼저 참고 사진을 추가하세요');
+    const v = modelFor('vision'); if (!v.key) { toast('AI 키가 없습니다 (⚙ AI 설정)'); return openSettings(); }
+    const imgs = [], labels = [];
+    for (const r of refs.slice(0, 8)) { const src = await getRef(r.id); if (!src) continue; labels.push(`사진${imgs.length}: ${(REF_KINDS[isSpace ? 'space' : it.type === 'person' ? 'person' : 'item'].find(k => k[0] === r.kind) || [])[1] || r.kind}${r.note ? ' — ' + r.note : ''}`); imgs.push(src); }
+    if (!imgs.length) return toast('참고 사진을 불러오지 못했습니다');
+    const kind = isSpace ? 'space' : it.type === 'person' ? 'person' : 'item';
+    const cur = isSpace ? A.describe().space && { ...A.describe().room, space: A.describe().space } : Object.fromEntries(Object.entries(it).filter(([k, val]) => !['g', 'refs', 'face', '_rt'].includes(k) && typeof val !== 'object'));
+    toast('🤖 참고 사진 분석 중… (10~40초)', 40000);
+    try {
+      const j = parseJSON(await aiText({ ...v, system: REFSYS(kind, cur), prompt: `첨부 사진 용도:\n${labels.join('\n')}\n${isSpace ? '' : it.type === 'person' ? '이 사람 모델에 반영할 값을 주세요.' : '이 가구에 반영할 값을 주세요.'}`, images: imgs, json: true }));
+      const set = { ...(j.set || {}) }; Object.keys(set).forEach(k => { if (set[k] === '' || set[k] == null) delete set[k]; });
+      if (kind === 'person' && j.face && Array.isArray(j.face.face_box)) { const src = imgs[Math.min(imgs.length - 1, Math.max(0, j.face.img | 0))]; try { set.face = await cropFace(src, j.face.face_box, { dx: 0, dy: 0, s: 1 }); set.skin = set.skin || await sampleSkin(set.face); } catch (e) { } }
+      if (j.desc) set.desc = String(j.desc).slice(0, 600);
+      const log = isSpace ? A.runActions([{ op: 'room', set }]) : A.runActions([{ op: 'update', target: A.itemLabel(it), set }]);
+      toast('✅ ' + (j.note || '참고 사진 내용을 반영했습니다') + ' (Ctrl+Z 되돌리기)', 6000); done && done(j, log);
+    } catch (e) { toast('⚠ ' + e.message, 7000); }
+  }
+  // 실사 렌더에 넣을 참고 사진 모으기 (사람 얼굴·옷 / 가구 느낌 / 공간 분위기)
+  async function collectRenderRefs(max = 10) {
+    const out = [], lines = [], add = async (r, who) => { if (out.length >= max) return; const src = await getRef(r.id); if (!src) return; out.push(src); lines.push(`Reference image #${out.length + 1} → ${who}: match its ${REF_EN[r.kind] || 'look'}${r.note ? ' (' + r.note + ')' : ''}.`); };
+    for (const r of (A.R.refs || []).filter(r => r.use !== 0)) await add(r, 'the whole space');
+    for (const it of A.items) { if (it.refUse === 0) continue; for (const r of (it.refs || []).slice(0, 3)) await add(r, `${A.itemLabel(it)} "${it.name}"${it.type === 'person' ? ` (the ${it.sex === 'f' ? 'woman' : it.sex === 'c' ? 'child' : 'man'} ${it.h}cm tall)` : ` (${A.TYPES[it.type] || it.type}, ${it.w}x${it.d}x${it.h}cm)`}`); }
+    return { imgs: out, text: lines.length ? `\nREFERENCE IMAGES: image #1 is the 3D layout to transform; the following images are references for specific objects. ${lines.join(' ')} Apply each reference ONLY to its object and only for the named aspect; keep positions, sizes and camera from image #1. People must remain fully and appropriately clothed as described.` : '' };
+  }
+  return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace, openLink, copyCfgFile, analyzeRefs, collectRenderRefs };
 }

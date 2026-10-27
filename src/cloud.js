@@ -84,6 +84,10 @@ export const Cloud = {
   async setMeta(k, v) { await setDoc(doc(db, 'users', user.uid, 'meta', k), { ...v, t: Date.now() }); },
   async delMeta(k) { await deleteDoc(doc(db, 'users', user.uid, 'meta', k)); },
   // 갤러리 (AI 렌더 이미지, 문서당 1MB 제한 → JPEG 압축)
+  // 참고 사진 (문서당 1MB 제한 → 900px JPEG)
+  async setRef(id, img) { await setDoc(doc(db, 'users', user.uid, 'refs', id), { img, t: Date.now() }); },
+  async getRef(id) { const d = await getDoc(doc(db, 'users', user.uid, 'refs', id)); return d.exists() ? d.data().img : null; },
+  async delRef(id) { await deleteDoc(doc(db, 'users', user.uid, 'refs', id)); },
   async listGallery() { const s = await getDocs(collection(db, 'users', user.uid, 'gallery')); return s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.t - a.t); },
   async saveGallery(id, v) { await setDoc(doc(db, 'users', user.uid, 'gallery', id), v); },
   async delGallery(id) { await deleteDoc(doc(db, 'users', user.uid, 'gallery', id)); },

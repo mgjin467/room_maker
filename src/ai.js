@@ -77,10 +77,10 @@ export function parseJSON(t) {
 }
 
 // 이미지 생성/편집 → dataURL
-export async function aiImage({ provider, model, key, prompt, image, aspect = '16:9', quality = 'high' }) {
+export async function aiImage({ provider, model, key, prompt, image, refs = [], aspect = '16:9', quality = 'high' }) {
   if (!key) throw new Error(`${PROVIDERS[provider]?.name || provider} API 키가 없습니다.`);
   if (provider === 'gemini') {
-    const parts = [...(image ? [{ inline_data: { mime_type: mime(image), data: b64(image) } }] : []), { text: prompt }];
+    const parts = [...[image, ...refs].filter(Boolean).map(im => ({ inline_data: { mime_type: mime(im), data: b64(im) } })), { text: prompt }];
     const j = await jfetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: aspect } } }) });
     const p = (j.candidates?.[0]?.content?.parts || []).find(x => x.inlineData || x.inline_data);
     if (!p) throw new Error('이미지가 생성되지 않았습니다. ' + ((j.candidates?.[0]?.content?.parts || []).map(x => x.text).join(' ').slice(0, 200) || j.candidates?.[0]?.finishReason || ''));
@@ -91,7 +91,8 @@ export async function aiImage({ provider, model, key, prompt, image, aspect = '1
     let j;
     if (image) {
       const fd = new FormData(); fd.append('model', model); fd.append('prompt', prompt); fd.append('size', size); fd.append('quality', quality);
-      const blob = await (await fetch(image)).blob(); fd.append('image', new File([blob], 'scene.png', { type: blob.type || 'image/png' }));
+      const all = [image, ...refs].filter(Boolean), key2 = all.length > 1 ? 'image[]' : 'image';
+      for (let i = 0; i < all.length; i++) { const blob = await (await fetch(all[i])).blob(); fd.append(key2, new File([blob], i ? `ref${i}.jpg` : 'scene.png', { type: blob.type || 'image/png' })); }
       j = await jfetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
     } else j = await jfetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify({ model, prompt, size, quality }) });
     const d = j.data?.[0]; if (!d) throw new Error('이미지가 생성되지 않았습니다');

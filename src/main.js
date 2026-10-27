@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CAT } from './catalog.js';
-import { buildParts, LEAF, NOPT, DEFA, TYPES, PV, LAMPS, COLSTY, colPat, OUTFITS, HAIRS, POSES, SLEEVES, TIES } from './builders.js';
+import { buildParts, LEAF, NOPT, DEFA, TYPES, PV, LAMPS, COLSTY, colPat, OUTFITS, HAIRS, POSES, SLEEVES, TIES, BODIES, TREES } from './builders.js';
 import { buildOpening, buildLight, WIN_ST, DOOR_ST, LKIND, kelvin, FCOLS, CURT, SWING, TEMPS, disposeTree } from './fixtures.js';
 import { drawPlan, polyArea } from './plan.js';
 import { RECT, orient, edgesOf, arcPts, outline, bbox, inside, segDist, P as EP, SHAPES, shapePreset, isRect } from './geom.js';
@@ -11,6 +11,9 @@ import { Cloud, takeCfgFromURL } from './cloud.js';
 import { initAI } from './aiui.js';
 import { faceTexture, sampleSkin } from './faces.js';
 import { initHScroll, reveal } from './hscroll.js';
+import { ENVS, ENV_DEF, GROUNDS, groundTex, skyTex, FOGC, buildEnv } from './env.js';
+import { putRef, getRef, delRef, uploadMissing, REF_KINDS } from './refs.js';
+import { fileToDataURL } from './ai.js';
 
 const $ = id => document.getElementById(id);
 const PI = Math.PI, rd = Math.round, r1 = v => Math.round(v * 10) / 10, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -81,7 +84,7 @@ const wrap = $('v'), cv = $('c');
 const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, preserveDrawingBuffer: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
-const camP = new THREE.PerspectiveCamera(45, 1, 5, 9000), camO = new THREE.OrthographicCamera(-100, 100, 100, -100, 1, 9000);
+const camP = new THREE.PerspectiveCamera(45, 1, 5, 30000), camO = new THREE.OrthographicCamera(-100, 100, 100, -100, 1, 9000);
 let cam = camP;
 const ctl = new OrbitControls(camP, cv); ctl.enableDamping = true; ctl.maxPolarAngle = PI / 2 - 0.02;
 const amb = new THREE.AmbientLight(0xffffff, 0.56), hemi = new THREE.HemisphereLight(0xffffff, 0xd8cfc0, 0.1), dl = new THREE.DirectionalLight(0xffffff, 0.42);
@@ -94,6 +97,75 @@ function rsz() {
 new ResizeObserver(rsz).observe(wrap);
 const roomG = new THREE.Group(), opG = new THREE.Group(), ltG = new THREE.Group(), fG = new THREE.Group(), dimG = new THREE.Group(), hdG = new THREE.Group();
 scene.add(roomG, opG, ltG, fG, dimG, hdG);
+// ---------- 공간: 한 프로젝트 안의 여러 방·야외 ----------
+// SPACES = [{ id, name, kind:'room'|'out', s: 저장된 상태(현재 공간은 s 없음) }]
+let SPACES = [{ id: 's1', name: '방 1', kind: 'room' }], SPID = 's1';
+const spKind = r => (r && r.kind === 'out' ? 'out' : 'room');
+const ROOM_PRE = [['빈 방 (기본)', 230, 278, 227], ['침실 350×330', 350, 330, 230], ['거실 450×380', 450, 380, 230], ['주방·다이닝 320×300', 320, 300, 230], ['욕실 200×230', 200, 230, 225], ['아이방 300×280', 300, 280, 230], ['사무실 600×500', 600, 500, 270], ['카페·매장 800×600', 800, 600, 300], ['스튜디오 900×700', 900, 700, 350], ['웨딩홀·연회장 1500×1200', 1500, 1200, 500], ['현재 공간과 같은 크기', 0, 0, 0]];
+const OUT_PRE = [['마당 1000×800', 1000, 800], ['캠핑 사이트 1200×1000', 1200, 1000], ['야외 웨딩 1800×1400', 1800, 1400], ['해변 2000×1500', 2000, 1500], ['넓은 들판 3000×2400', 3000, 2400]];
+function outdoorState(env, W = 1200, D = 1000) {
+  const d = ENV_DEF[env] || ENV_DEF.field;
+  return { R: { ...JSON.parse(JSON.stringify(DEF_R)), kind: 'out', env, gk: d.g, gc: d.gc, pts: RECT(W, D), H: 400, vtime: 'auto' }, ops: [], lights: [], items: [], meas: [] };
+}
+function roomState(W, D, H) { const s = emptyState(); if (W && D) { s.R.pts = RECT(W, D); s.R.H = H || s.R.H; s.ops[0].s = Math.min(s.ops[0].s, W - 90); } return s; }
+function curSpaceState() { const s = snap(); delete s.spaces; delete s.spid; return s; }
+function switchSpace(id, quiet) {
+  if (id === SPID || !SPACES.some(x => x.id === id)) return;
+  flush(); const cur = SPACES.find(x => x.id === SPID); if (cur) { cur.s = curSpaceState(); cur.kind = spKind(R); }
+  const tgt = SPACES.find(x => x.id === id), st = { ...(tgt.s || roomState()), spaces: SPACES.map(x => x.id === id ? { id: x.id, name: x.name, kind: x.kind } : x), spid: id };
+  load(st); commit(); fitView(); renderRoom(); renderSpacePill(); if (!quiet) toast(`${tgt.kind === 'out' ? '🌳' : '🏠'} '${tgt.name}'(으)로 이동`);
+}
+function addSpace(name, state) {
+  const id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+  SPACES.push({ id, name: uniqSpace(name), kind: spKind(state.R), s: state }); switchSpace(id, true); toast(`＋ '${SPACES.find(x => x.id === id).name}' 공간을 추가했습니다`); return id;
+}
+const uniqSpace = n => { n = (n || '').trim() || '공간'; let k = n, i = 2; while (SPACES.some(x => x.name === k)) k = `${n} ${i++}`; return k; };
+function renameSpace(id) { const sp = SPACES.find(x => x.id === id); if (!sp) return; const v = (prompt('공간 이름', sp.name) || '').trim(); if (!v || v === sp.name) return; sp.name = uniqSpace(v); commit(); renderRoom(); renderSpacePill(); }
+function dupSpace(id) { const sp = SPACES.find(x => x.id === id); if (!sp) return; const st = id === SPID ? curSpaceState() : JSON.parse(JSON.stringify(sp.s)); addSpace(sp.name + ' 복사본', st); }
+function deleteSpace(id) {
+  if (SPACES.length < 2) return toast('공간이 하나뿐이라 삭제할 수 없습니다');
+  const sp = SPACES.find(x => x.id === id); if (!sp || !confirm(`'${sp.name}' 공간을 삭제할까요? (Ctrl+Z로 되돌릴 수 있음)`)) return;
+  if (id === SPID) { const other = SPACES.find(x => x.id !== id); switchSpace(other.id, true); }
+  SPACES = SPACES.filter(x => x.id !== id); commit(); renderRoom(); renderSpacePill(); toast(`'${sp.name}' 공간을 삭제했습니다`);
+}
+function addSpaceDlg(kind) {
+  const body = h('div', {}), nm = h('input', { type: 'text', value: uniqSpace(kind === 'out' ? '야외' : '방') });
+  let env = 'field', pre = 0;
+  const envBox = h('div', { class: 'ch' }), preBox = h('div', { class: 'ch' });
+  const draw = () => {
+    envBox.innerHTML = ''; preBox.innerHTML = '';
+    if (kind === 'out') ENVS.forEach(([k, n]) => envBox.append(BTN(n, () => { env = k; draw(); }, 'c' + (env === k ? ' on' : ''))));
+    (kind === 'out' ? OUT_PRE : ROOM_PRE).forEach((p, i) => preBox.append(BTN(p[0], () => { pre = i; draw(); }, 'c' + (pre === i ? ' on' : ''))));
+  };
+  draw();
+  app(body, F('이름', nm), kind === 'out' ? h('h4', {}, '환경') : null, kind === 'out' ? envBox : null, h('h4', {}, '크기'), preBox,
+    h('div', { class: 'r' }, BTN('만들기', () => {
+      const p = (kind === 'out' ? OUT_PRE : ROOM_PRE)[pre];
+      const st = kind === 'out' ? outdoorState(env, p[1], p[2]) : p[1] ? roomState(p[1], p[2], p[3]) : roomState(R.W, R.D, R.kind === 'out' ? 230 : R.H);
+      m.close(); addSpace(nm.value, st);
+    }, 'b'), BTN('취소', () => m.close())),
+    h('p', { class: 'mu sm' }, '사진·도면으로 만들려면 AI 탭 → 「방·도면 사진 인식」 또는 아래의 「📷 사진·도면으로 공간 만들기」를 쓰세요.'));
+  const m = mdl(kind === 'out' ? '🌳 야외 공간 추가' : '🏠 방 추가', body);
+}
+function spaceBlock() {
+  return h('div', { class: 'spbox' },
+    h('div', { class: 'ch spc' }, SPACES.map(sp => BTN((sp.kind === 'out' ? '🌳 ' : '🏠 ') + sp.name, () => switchSpace(sp.id), 'c' + (sp.id === SPID ? ' on' : '')))),
+    h('div', { class: 'r' }, BTN('＋ 방 추가', () => addSpaceDlg('room'), 'b'), BTN('＋ 야외 추가', () => addSpaceDlg('out'), 'b'), BTN('📷 사진·도면으로 공간 만들기', () => AI.openPhoto('room'), 'o')),
+    h('div', { class: 'r' }, BTN('✎ 이름 변경', () => renameSpace(SPID), 'c'), BTN('⧉ 이 공간 복제', () => dupSpace(SPID), 'c'), SPACES.length > 1 ? BTN('🗑 이 공간 삭제', () => deleteSpace(SPID), 'c danger') : null));
+}
+function renderSpacePill() { const el = $('spcPill'); if (!el) return; const sp = SPACES.find(x => x.id === SPID) || {}; el.textContent = (spKind(R) === 'out' ? '🌳 ' : '🏠 ') + (sp.name || '공간') + (SPACES.length > 1 ? ` (${SPACES.length})` : '') + ' ▾'; const mb = $('ddspc'); if (mb) mb.textContent = '🏠 공간: ' + (sp.name || '') + ' (바꾸기·추가)'; }
+// 야외 지면·풍경
+const envG = new THREE.Group(); scene.add(envG);
+function buildOutdoor() {
+  const D0 = ENV_DEF[R.env] || ENV_DEF.field, gk = R.gk || D0.g, gc = R.gc || D0.gc, t = vtimeNow(); R.vtimeNow = t;
+  const gt = groundTex(gk, gc), S = 24000, tex = gt.tex.clone(); tex.needsUpdate = true; tex.repeat.set(S / gt.u, S / gt.u);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(S, S), new THREE.MeshLambertMaterial({ map: tex })); ground.rotation.x = -PI / 2; ground.position.set(BB.x0 + BB.W / 2, -0.2, BB.z0 + BB.D / 2); roomG.add(ground);
+  // 사이트(배치 영역) 경계: 점선
+  const pts = OL.map(([x, z]) => new THREE.Vector3(x, 0.6, z)); pts.push(pts[0].clone());
+  const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 30, gapSize: 18, transparent: true, opacity: 0.85 })); ln.computeLineDistances(); roomG.add(ln);
+  envG.add(buildEnv(R, BB, t));
+}
+
 const selBox = new THREE.BoxHelper(undefined, 0x2f6fed); selBox.visible = false; selBox.material.depthTest = false; selBox.renderOrder = 20; scene.add(selBox);
 
 // ---------- 공통 헬퍼 ----------
@@ -197,8 +269,9 @@ function addSeg(p, q, H, mtl, bbm, holes) {
   cap.position.set(cx - n[0] * 6, H + 1, cz - n[1] * 6); cap.rotation.y = ry; roomG.add(cap);
 }
 function buildRoom() {
-  geo(); disposeTree(roomG); roomG.clear(); disposeTree(opG); opG.clear();
+  geo(); disposeTree(roomG); roomG.clear(); disposeTree(opG); opG.clear(); disposeTree(envG); envG.clear();
   const H = R.H;
+  if (R.kind === 'out') { buildOutdoor(); buildHandles(); applyLightMode(); return; }
   // 바닥 / 슬래브 / 천장
   const sh = new THREE.Shape(OL.map(([x, z]) => new THREE.Vector2(x, -z))), shC = new THREE.Shape(OL.map(([x, z]) => new THREE.Vector2(x, z)));
   const ft = floorTex(R.fl, R.flc), tex = ft.tex; tex.repeat.set(1 / ft.u, 1 / ft.u); tex.center.set(0, 0); tex.rotation = (R.fld || 0) * PI / 180; tex.needsUpdate = true;
@@ -326,9 +399,18 @@ function placeLight(l) {
 }
 function applyLightMode() {
   const n = !!PREF.night;
-  amb.intensity = n ? 0.14 : 0.56; hemi.intensity = n ? 0.04 : 0.1; dl.intensity = n ? 0.03 : 0.42;
-  scene.background = n ? new THREE.Color(0x14161b) : null;
-  scene.traverse(o => { if (o.isPointLight) o.intensity = o.userData.base * (n ? 1 : 0.12); });
+  const out = R.kind === 'out', tm = out ? vtimeNow() : null;
+  if (out) {
+    const nt = tm === 'night', ss = tm === 'sunset' || tm === 'dawn';
+    amb.intensity = nt ? 0.1 : 0.3; hemi.intensity = nt ? 0.06 : 0.32; hemi.color.set(nt ? 0x3a4a6a : ss ? 0xffd2b0 : 0xcfe3ff); hemi.groundColor.set(nt ? 0x101418 : 0x7a8a5a);
+    dl.intensity = nt ? 0.06 : ss ? 0.45 : tm === 'cloudy' ? 0.25 : 0.52; dl.color.set(nt ? 0x8aa0d0 : ss ? 0xffb27a : 0xffffff); dl.position.set(BB.x0 - 600, ss ? 400 : 1800, BB.z0 + 900);
+    scene.background = skyTex(tm); scene.fog = new THREE.Fog(FOGC[tm] || FOGC.day, 5000, 22000);
+  } else {
+    hemi.color.set(0xffffff); hemi.groundColor.set(0xd8cfc0); dl.color.set(0xffffff); dl.position.set(200, 500, 400); scene.fog = null;
+    amb.intensity = n ? 0.14 : 0.56; hemi.intensity = n ? 0.04 : 0.1; dl.intensity = n ? 0.03 : 0.42;
+    scene.background = n ? new THREE.Color(0x14161b) : null;
+  }
+  const dark = out ? tm === 'night' : n; scene.traverse(o => { if (o.isPointLight) o.intensity = o.userData.base * (dark ? 1 : out ? 0.25 : 0.12); });
   items.forEach(it => it.g && applyLightModeItem(it));
   LIGHTS.forEach(l => l.g && l.g.userData.em.forEach(m => m.emissive.copy(l.on !== false ? kelvin(l.temp).multiplyScalar((n ? 1 : 0.45) * ((l.lum ?? 1) <= 0 ? 0 : Math.min(1, (l.lum ?? 1) + 0.15))) : BLACK)));
   const b = $('night'); if (b) { b.classList.toggle('on', n); b.querySelector('.t') && (b.querySelector('.t').textContent = n ? '주간' : '야간'); }
@@ -585,7 +667,7 @@ function upd() { check(); dims(); markList(); quick(); infoSel(); syncSel(); upd
 
 // ---------- 히스토리 / 프로젝트 / 클라우드 ----------
 const clean = o => { const { g, ov, wb, db, out, _rt, ...r } = o; return r; };
-function snap() { const { W, D, vtimeNow: _v, ...r } = R; void W; void D; return { R: JSON.parse(JSON.stringify(r)), ops: OPS.map(clean), lights: LIGHTS.map(clean), items: items.map(clean), meas: MEAS.map(m => [...m]) }; }
+function snap() { const { W, D, vtimeNow: _v, ...r } = R; void W; void D; return { R: JSON.parse(JSON.stringify(r)), ops: OPS.map(clean), lights: LIGHTS.map(clean), items: items.map(clean), meas: MEAS.map(m => [...m]), spaces: SPACES.map(sp => sp.id === SPID ? { id: sp.id, name: sp.name, kind: spKind(R) } : sp), spid: SPID }; }
 let hist = [], hi = -1, ct = null;
 function commit() { ct = null; const s = JSON.stringify(snap()); if (hist[hi] === s) return; hist = hist.slice(0, hi + 1); hist.push(s); if (hist.length > 150) hist.shift(); hi = hist.length - 1; saveProj(s); updUndo(); }
 function commitSoon(ms = 350) { clearTimeout(ct); ct = setTimeout(commit, ms); }
@@ -700,6 +782,7 @@ async function onLogin(u, quiet) {
     const st = await Cloud.getMeta('settings');
     let legacy = []; if (st) { SZ = { ...SZ, ...(st.sizes || {}) }; LS.set(K_SZ, SZ); try { legacy = JSON.parse(st.custom || '[]'); } catch (e) { } }
     await syncLib(legacy); watchLib();
+    { const ids = []; const scan = st => { if (!st) return; (st.R && st.R.refs || []).forEach(r => ids.push(r.id)); (st.items || []).forEach(i => (i.refs || []).forEach(r => ids.push(r.id))); }; Object.values(PROJ).forEach(p => { scan(p.s); ((p.s && p.s.spaces) || []).forEach(sp => scan(sp.s)); }); uploadMissing(ids).then(n => { if (n) toast(`📎 참고 사진 ${n}장을 클라우드에 올렸습니다`); }); }
     await AI.onLogin();
     // 지금 화면이 손대지 않은 예시 방이거나 없어졌으면 → 클라우드에서 가장 최근에 저장한 프로젝트 열기
     const cp = PROJ[projName], pristine = !cp || (!cp.dirty && cp.ct === undefined);
@@ -722,6 +805,8 @@ function clearScene() { items.forEach(i => { if (i.g) { fG.remove(i.g); disposeT
 function load(st0, keepSel) {
   const st = normState(st0), sk = sel && sel.o ? [sel.k, sel.o.id] : null;
   clearScene(); sel = null;
+  SPACES = Array.isArray(st.spaces) && st.spaces.length ? st.spaces.map(x => ({ ...x })) : [{ id: 's1', name: spKind(st.R) === 'out' ? '야외 1' : '방 1', kind: spKind(st.R) }];
+  SPID = st.spid && SPACES.some(x => x.id === st.spid) ? st.spid : SPACES[0].id; SPACES.forEach(x => { if (x.id === SPID) delete x.s; });
   R = st.R; R.wcs = { ...(R.wcs || {}) }; R.bul = { ...(R.bul || {}) }; geo();
   OPS = (st.ops || []).map(o => ({ ...o })); LIGHTS = (st.lights || []).map(l => ({ ...l })); items = (st.items || []).map(normItem); MEAS = (st.meas || []).map(m => [...m]);
   nid = Math.max(0, ...OPS.map(o => o.id || 0), ...LIGHTS.map(o => o.id || 0), ...items.map(o => o.id || 0)) + 1;
@@ -730,7 +815,7 @@ function load(st0, keepSel) {
   applyLightMode();
   let s = null;
   if (keepSel && sk) { const pool = sk[0] === 'item' ? items : sk[0] === 'op' ? OPS : LIGHTS, o = pool.find(x => x.id === sk[1]); if (o) s = { k: sk[0], o }; }
-  setSel(s); check(); dims(); renderRoom(); renderLights(); markList(); updArea(); renderFile();
+  setSel(s); check(); dims(); renderRoom(); renderLights(); markList(); updArea(); renderFile(); renderSpacePill();
 }
 function openProject(name, fresh, keepView) {
   flush(); if (name !== projName) LS.set(K_OPENED, Date.now()); projName = name;
@@ -1094,8 +1179,8 @@ function captureView(k, w, h, { clean: cl = true } = {}) {
   const extra = []; if (cl) { scene.traverse(o => { if ((o.userData.label || (o.isLineSegments && o.parent && o.parent.userData && o.parent.userData.e === o) || o.userData.rh) && o.visible) { extra.push(o); o.visible = false; } }); hide.forEach(o => { o.visible = false; }); }
   let c;
   if (k === 'cur' || k === 'plan') { c = (cam === camO ? camO : camP).clone(); if (c.isPerspectiveCamera) { c.aspect = w / h; c.updateProjectionMatrix(); } else { const hh = (camO.top - camO.bottom) / 2; c.left = -hh * w / h; c.right = hh * w / h; c.updateProjectionMatrix(); } }
-  else if (k === 'sel' && sel && sel.o && sel.o.g) { const box = new THREE.Box3().setFromObject(sel.o.g), cc = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()).length(), dir = camP.position.clone().sub(ctl.target).normalize(); c = new THREE.PerspectiveCamera(45, w / h, 5, 9000); c.position.copy(cc).add(dir.multiplyScalar(Math.max(140, sz * 2))); c.lookAt(cc); }
-  else { const p = camPreset(k) || camPreset('door'); c = new THREE.PerspectiveCamera(p.fov, w / h, 5, 9000); c.position.set(...p.pos); c.lookAt(new THREE.Vector3(...p.tgt)); }
+  else if (k === 'sel' && sel && sel.o && sel.o.g) { const box = new THREE.Box3().setFromObject(sel.o.g), cc = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3()).length(), dir = camP.position.clone().sub(ctl.target).normalize(); c = new THREE.PerspectiveCamera(45, w / h, 5, 30000); c.position.copy(cc).add(dir.multiplyScalar(Math.max(140, sz * 2))); c.lookAt(cc); }
+  else { const p = camPreset(k) || camPreset('door'); c = new THREE.PerspectiveCamera(p.fov, w / h, 5, 30000); c.position.set(...p.pos); c.lookAt(new THREE.Vector3(...p.tgt)); }
   const bg0 = scene.background; if (!bg0) scene.background = new THREE.Color(0xe9e6df);
   renderer.setPixelRatio(1); renderer.setSize(w, h, false); renderer.render(scene, c); scene.background = bg0;
   const url = cv.toDataURL('image/png');
@@ -1439,7 +1524,7 @@ let unwatchLib = null;
 function watchLib() { if (unwatchLib) unwatchLib(); unwatchLib = Cloud.watchMeta ? Cloud.watchMeta('library', d => { if (d && d.dev !== DEV && applyRemoteLib(d)) toast('☁ 다른 기기에서 바꾼 내 가구·카테고리를 반영했습니다', 3500); }) : null; }
 const uniqLib = (n, except) => { let k = n, i = 2; while (CUSTOM.some(p => p[0] === k && p !== except)) k = `${n} (${i++})`; return k; };
 function newCat(name) { name = (name || '').trim(); if (!name) return null; const ex = LIB.cats.find(c => c.name === name); if (ex) return ex.id; const id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); LIB.cats.push({ id, name }); return id; }
-const EXK = ['c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'price', 'memo'];
+const EXK = ['body', 'desc', 'refs', 'c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'price', 'memo'];
 // 간단한 창 (aiui 의 모달과 같은 모양)
 function mdl(title, body) {
   const bg = h('div', { class: 'mdl' }), box = h('div', { class: 'mdl-box' }), close = () => bg.remove();
@@ -1597,6 +1682,7 @@ function itemPanel(b, it) {
     !isP ? G(2, F('재질 (주)', bsel(MATS, () => it.mat || '', v => { it.mat = v; C2(); })), F('재질 (보조)', bsel(MATS, () => it.mat2 || '', v => { it.mat2 = v; C2(); }))) : null,
     isP ? personEditor(it, C2) : null,
     it.type === 'plant' ? F('식물 종류', bsel(PV, () => it.pv || 'leafy', v => { it.pv = v; C2(); })) : null,
+    it.type === 'tree' ? F('나무 종류', bsel(TREES, () => it.pv || 'broad', v => { it.pv = v; C2(); })) : null,
     colEditor(it),
     h('h4', {}, '크기 (cm)'),
     G(3, F('가로', bnum(() => it.w, v => { setSize(it, 'w', v); sizeChanged(it); }, { min: 1 })), F('세로 (깊이)', bnum(() => it.d, v => { setSize(it, 'd', v); sizeChanged(it); }, { min: 1 })), F(isP ? '키' : '높이', bnum(() => it.h, v => { setSize(it, 'h', v); sizeChanged(it); }, { min: 1 }))),
@@ -1616,6 +1702,7 @@ function itemPanel(b, it) {
       : G(4, F('왼쪽에서', bnum(() => it.x - fp(it)[0] / 2 - BB.x0, v => { it.x = BB.x0 + v + fp(it)[0] / 2; fit(it, false); upd(); })), F('뒤에서', bnum(() => it.z - fp(it)[1] / 2 - BB.z0, v => { it.z = BB.z0 + v + fp(it)[1] / 2; fit(it, false); upd(); })),
         F('바닥에서 높이', bnum(() => it.y || 0, v => { it.y = v; fit(it, false); upd(); }, { min: 0 })), F('각도 (시계°)', bnum(() => cwOf(it), v => { it.rot = norm360(-v); fit(it, false); upd(); }, { step: 15 }))),
     it.mt !== 'w' ? [rotWidget(it), h('div', { class: 'r' }, BTN('가로 중앙', () => { it.x = center()[0]; fit(it, false); upd(); }, 'c'), BTN('세로 중앙', () => { it.z = center()[1]; fit(it, false); upd(); }, 'c'))] : null,
+    refsSection(it),
     h('h4', {}, '옵션'),
     h('div', { class: 'cg' },
       LEAF[it.type] ? bchk('날개 접기', () => it.fold, v => { it.fold = v; RF(); commitSoon(); }) : null,
@@ -1629,6 +1716,40 @@ function itemPanel(b, it) {
     h('div', { class: 'r keep' }, BTN('복제 (Ctrl+D)', dupSel), BTN('💾 내 가구로 저장…', () => saveCustom(it)), BTN('카메라 맞춤', focusSel)), h('div', { class: 'r' }, BTN('삭제 (Del)', delSel)),
   );
 }
+// ---------- 📎 참고 사진 (객체·공간별) ----------
+// target: 가구/사람 객체 또는 'space'
+function refsSection(target) {
+  const isSp = target === 'space', o = isSp ? R : target, kinds = REF_KINDS[isSp ? 'space' : o.type === 'person' ? 'person' : 'item'];
+  const fi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }), cam = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
+  const kindSel = h('select', { class: 'rkind' }, kinds.map(([k, n]) => h('option', { value: k }, n))); kindSel.value = LS.get('r3d_rkind_' + (isSp ? 's' : o.type === 'person' ? 'p' : 'i'), kinds[0][0]);
+  kindSel.onchange = () => LS.set('r3d_rkind_' + (isSp ? 's' : o.type === 'person' ? 'p' : 'i'), kindSel.value);
+  const rerender = () => { if (isSp) renderRoom(); else renderSel(); };
+  const addFiles = async files => {
+    if (!isSp && o.lock) return toast('잠긴 가구입니다');
+    const list = o.refs = [...(o.refs || [])];
+    for (const f of files) { const d = await fileToDataURL(f, 900, 0.82); const id = await putRef(d); list.push({ id, kind: kindSel.value }); }
+    commitSoon(0); rerender(); toast(`📎 참고 사진 ${files.length}장 추가 — 「🤖 사진대로 적용」을 누르면 3D에 반영됩니다`, 4000);
+  };
+  fi.onchange = () => { addFiles([...fi.files]); fi.value = ''; }; cam.onchange = () => { addFiles([...cam.files]); cam.value = ''; };
+  const refs = o.refs || [];
+  const grid = h('div', { class: 'refg' }, refs.map((r, i) => {
+    const img = h('img', { alt: '참고 사진' }); getRef(r.id).then(src => { if (src) img.src = src; else img.alt = '(이 기기에 없음)'; });
+    const ks = h('select', {}, kinds.map(([k, n]) => h('option', { value: k }, n))); ks.value = r.kind; ks.onchange = () => { r.kind = ks.value; commitSoon(0); };
+    const nt = h('input', { type: 'text', placeholder: '메모 (예: 이 소파의 패브릭)', value: r.note || '' }); nt.onchange = () => { r.note = nt.value.trim() || undefined; commitSoon(0); };
+    return h('div', { class: 'refc' }, h('div', { class: 'refi', onclick: () => { if (img.src) mdl('참고 사진', h('img', { src: img.src, class: 'full' })); } }, img), ks, nt,
+      h('button', { class: 'x', title: '빼기', onclick: () => { o.refs = refs.filter((_, j) => j !== i); if (!o.refs.length) delete o.refs; if (!items.some(it => (it.refs || []).some(x => x.id === r.id)) && !(R.refs || []).some(x => x.id === r.id)) delRef(r.id); commitSoon(0); rerender(); } }, '×'));
+  }));
+  const desc = h('textarea', { rows: 2, placeholder: isSp ? '분위기 설명 (실사 렌더에 반영) — 예: warm minimal Scandinavian, soft daylight' : '외형 설명 (실사 렌더에 반영) — AI가 사진을 분석하면 자동으로 채워집니다' }, o.desc || '');
+  desc.onchange = () => { o.desc = desc.value.trim() || undefined; commitSoon(0); };
+  return h('div', { class: 'refbox keep' },
+    h('h4', {}, isSp ? '📎 공간 참고 사진 (분위기·마감·풍경)' : '📎 참고 사진 (실사·인식용)'),
+    h('p', { class: 'mu sm' }, isSp ? '원하는 분위기·마감재·풍경 사진을 붙이면 AI가 바닥·벽·환경에 반영하고, 실사 이미지를 만들 때도 참고합니다.' : o.type === 'person' ? '얼굴·옷차림·체형·자세·헤어 사진을 각각 붙이세요. 「🤖 사진대로 적용」을 누르면 3D 사람에 반영되고, 실사 이미지에서도 사진처럼 표현합니다.' : '원하는 느낌·모양·재질·디테일 사진(또는 치수 도면)을 붙이세요. 3D 모양·색·재질에 반영되고 실사 이미지에서도 사진처럼 표현합니다.'),
+    h('div', { class: 'r' }, F('용도', kindSel), BTN('🖼 사진 추가', () => fi.click(), 'b'), isMobile() ? BTN('📸 촬영', () => cam.click(), 'c') : null, fi, cam),
+    refs.length ? grid : null,
+    refs.length ? h('div', { class: 'r' }, BTN('🤖 사진대로 3D에 적용', () => AI.analyzeRefs(isSp ? 'space' : o, () => rerender()), 'b'),
+      !isSp ? bchk('실사 이미지에 이 사진 참고', () => o.refUse !== 0, v => { o.refUse = v ? undefined : 0; commitSoon(0); }) : null) : null,
+    F(isSp ? '분위기 설명' : '외형 설명', desc));
+}
 function personEditor(it, C2) {
   const chip = (list, key, def, after) => h('div', { class: 'ch' }, list.map(([v, t]) => BTN(t, () => { it[key] = v; if (after) after(v); C2(); renderSel(); }, 'c' + ((it[key] || def) === v ? ' on' : ''))));
   const sl = (lbl, k, min, max, step, fmt, def = 0) => F(lbl, brange(() => it[k] ?? (POSES[it.pose] || POSES.stand)[1][k] ?? def, v => { it[k] = v; C2(); }, min, max, step, fmt));
@@ -1640,6 +1761,7 @@ function personEditor(it, C2) {
   return h('div', { class: 'pe' },
     h('h4', {}, '기본'),
     G(3, F('성별', bsel([['m', '남성'], ['f', '여성'], ['c', '어린이']], () => it.sex || 'm', v => { it.sex = v; C2(); })), F('키 (cm)', bnum(() => it.h, v => { setSize(it, 'h', v); sizeChanged(it); }, { min: 50, max: 230 })), F('빠른 키', h('div', { class: 'r' }, BTN('180', () => { setSize(it, 'h', 180); sizeChanged(it); syncSel(); }, 'c'), BTN('165', () => { setSize(it, 'h', 165); sizeChanged(it); syncSel(); }, 'c'), BTN('120', () => { setSize(it, 'h', 120); sizeChanged(it); syncSel(); }, 'c')))),
+    F('체형', chip(Object.entries(BODIES).map(([k, [n]]) => [k, n]), 'body', 'std')),
     G(3, sl('어깨 너비', 'shw', 0.8, 1.25, 0.01, pct, 1), sl('체형 (마름↔통통)', 'build', 0.75, 1.45, 0.01, pct, 1), sl('머리 크기', 'headS', 0.8, 1.3, 0.01, pct, 1)),
     h('h4', {}, '얼굴'),
     h('div', { class: 'facebox' }, it.face ? h('img', { src: it.face, class: 'facethumb' }) : h('span', { class: 'mu sm' }, '얼굴 사진 없음'),
@@ -1784,6 +1906,8 @@ function renderRoom() {
   const ws = h('select', {}, E.filter(straight).map(e => h('option', { value: e.i }, `벽${e.i + 1}`))), wst = h('select', {}, WIN_ST.map(([v, t]) => h('option', { value: v }, t)));
   const ds = h('select', {}, E.filter(straight).map(e => h('option', { value: e.i }, `벽${e.i + 1}`))), dst = h('select', {}, DOOR_ST.map(([v, t]) => h('option', { value: v }, t)));
   const rect = isRect(R.pts, R.bul);
+  app(b, h('h3', {}, `공간 (${SPACES.length})`), spaceBlock(), refsSection('space'));
+  if (R.kind === 'out') { outdoorPanel(b, rect); updArea(); syncSel(); delete b.dataset.dirty; return; }
   app(b,
     h('h3', {}, '방 치수 (cm)'),
     G(3, F(rect ? '가로 (좌↔우)' : '외곽 가로', bnum(() => R.W, v => setRoomDim('W', v), { min: 60 })), F(rect ? '깊이 (뒤↔앞)' : '외곽 깊이', bnum(() => R.D, v => setRoomDim('D', v), { min: 60 })), F('천장 높이', bnum(() => R.H, v => setRoomDim('H', v), { min: 150 }))),
@@ -1818,6 +1942,39 @@ function renderRoom() {
     MEAS.length ? h('div', { class: 'r' }, BTN(`줄자 측정선 ${MEAS.length}개 지우기`, () => { MEAS = []; dims(); upd(); renderRoom(); })) : null,
   );
   updArea(); syncSel(); delete b.dataset.dirty;
+}
+const OUT_TIME = [['auto', '자동 (주간/야간 모드)'], ['day', '맑은 낮'], ['cloudy', '흐린 낮'], ['dawn', '새벽·아침'], ['sunset', '노을'], ['night', '밤']];
+function outdoorPanel(b, rect) {
+  const D0 = ENV_DEF[R.env] || ENV_DEF.field, RB = () => { buildRoom(); commitSoon(); };
+  app(b,
+    h('h3', {}, '야외 환경'),
+    h('div', { class: 'ch' }, ENVS.map(([k, n]) => BTN(n, () => { R.env = k; R.gk = ENV_DEF[k].g; R.gc = ENV_DEF[k].gc; RB(); renderRoom(); }, 'c' + (R.env === k ? ' on' : '')))),
+    G(2, F('지면', bsel(GROUNDS, () => R.gk || D0.g, v => { R.gk = v; RB(); })), F('지면 색', bcol(() => R.gc || D0.gc, v => { R.gc = v; buildRoom(); }))),
+    F('시간·날씨', bsel(OUT_TIME, () => R.vtime || 'auto', v => { R.vtime = v; RB(); })),
+    h('h3', {}, '배치 영역 (사이트) 크기 cm'),
+    G(3, F('가로', bnum(() => R.W, v => setRoomDim('W', v), { min: 100 })), F('깊이', bnum(() => R.D, v => setRoomDim('D', v), { min: 100 })), F('조명 설치 높이', bnum(() => R.H, v => setRoomDim('H', v), { min: 100 }))),
+    h('div', { class: 'mu sm', id: 'area' }),
+    h('p', { class: 'mu sm' }, '흰 점선 안이 배치 영역입니다. 가장자리 주황 손잡이로 끌어서 넓히거나 줄일 수 있고, 밖으로 나간 가구는 경고가 표시됩니다.'),
+    h('div', { class: 'cg' }, bchk('🔒 영역 모양·크기 잠금', () => R.lock, v => setLock({ k: 'edge', i: 0 }, v))),
+    h('h3', {}, '영역 모양'),
+    h('div', { class: 'ch' }, SHAPES.map(([k, n]) => BTN(n, () => { if (!rect && !confirm('모양을 바꾸면 꼭짓점 편집이 초기화됩니다. 계속할까요?')) return; applyShape(k); }, 'c'))),
+    h('div', { class: 'cg' }, bchk('모양 편집 모드 (꼭짓점 드래그·추가·삭제)', () => PREF.shapeEdit, v => { PREF.shapeEdit = v ? 1 : 0; savePref(); buildHandles(); syncTb(); })),
+    h('h3', {}, '빠르게 꾸미기'),
+    h('div', { class: 'r' }, BTN('🌳 둘레에 나무 심기', () => outdoorDecor('trees'), 'c'), BTN('🪨 바위·덤불 흩뿌리기', () => outdoorDecor('rocks'), 'c'), BTN('🌸 꽃밭 배치', () => outdoorDecor('flowers'), 'c'), BTN('💡 정원등 4개', () => outdoorDecor('lamps'), 'c')),
+    h('p', { class: 'mu sm' }, '야외·조경 카테고리(추가 탭)에 나무·바위·파라솔·텐트·아치·데크 등이 있습니다. 창문·문은 실내 공간에서만 쓰입니다.'),
+    h('h3', {}, '치수선 표시'),
+    h('div', { class: 'cg' }, [['room', '영역 둘레 길이'], ['item', '선택 가구 크기'], ['gap', '주변 간격']].map(([k, n]) => bchk(n, () => PREF.dims[k], v => { PREF.dims[k] = v ? 1 : 0; savePref(); dims(); }))));
+}
+function outdoorDecor(kind) {
+  const add = [], per = (u, k) => { const P = []; const L = 2 * (BB.W + BB.D); for (let i = 0; i < k; i++) { const t = (i + 0.5) / k * L; let x, z; if (t < BB.W) { x = BB.x0 + t; z = BB.z0 + u; } else if (t < BB.W + BB.D) { x = BB.x1 - u; z = BB.z0 + (t - BB.W); } else if (t < 2 * BB.W + BB.D) { x = BB.x1 - (t - BB.W - BB.D); z = BB.z1 - u; } else { x = BB.x0 + u; z = BB.z1 - (t - 2 * BB.W - BB.D); } P.push([x, z]); } return P; };
+  let a = 41; const rr = () => { a = (a * 16807) % 2147483647; return a / 2147483647; };
+  const TP = { field: '활엽수 (큰 나무) 500', mountain: '소나무 450', forest: '소나무 450', snow: '소나무 450', beach: '야자수 600', sand: '야자수 600', garden: '사이프러스 400', plaza: '사이프러스 400', rooftop: '사이프러스 400' }[R.env] || '활엽수 (큰 나무) 500';
+  const tp = findPresetByName(TP), tu = tp ? Math.max(tp.p[1], tp.p[2]) / 2 + 15 : 160;
+  if (kind === 'trees') per(tu, Math.max(4, Math.round((BB.W + BB.D) / 450))).forEach(([x, z]) => add.push({ preset: TP, x: x - BB.x0, z: z - BB.z0 }));
+  if (kind === 'rocks') for (let i = 0; i < 8; i++) add.push({ preset: i % 2 ? '바위 (큰)' : '관목 (덤불) 120', x: 60 + rr() * (BB.W - 120), z: 60 + rr() * (BB.D - 120) });
+  if (kind === 'flowers') per(120, 4).forEach(([x, z]) => add.push({ preset: '꽃밭·화단 200', x: x - BB.x0, z: z - BB.z0 }));
+  if (kind === 'lamps') [[0.08, 0.08], [0.92, 0.08], [0.08, 0.92], [0.92, 0.92]].forEach(([u, v]) => add.push({ preset: '정원등·가로등', x: BB.W * u, z: BB.D * v }));
+  runActions(add.map(item => ({ op: 'add', item }))); upd(); toast(`${add.length}개를 배치했습니다`);
 }
 function renderLights() {
   const b = $('t-light'); if (b.hidden && b.childElementCount) { b.dataset.dirty = 1; return; } b.innerHTML = '';
@@ -1980,7 +2137,16 @@ function importJSON(t, fn) {
 
 // ---------- 툴바 ----------
 const TBK = [['snap', '스냅·벽/가구 붙이기'], ['handles', '벽 이동 핸들'], ['shapeEdit', '방 모양 편집 (꼭짓점)'], ['labels', '라벨 (책장1 등)'], ['ceil', '천장 표시'], ['vdoor', '문 표시'], ['vwin', '창문 표시'], ['stack', '소품 위에 올리기'], ['touchSafe', '터치: 선택 후 이동']];
+$('spcPill').onclick = () => spaceMenu();
+function spaceMenu() {
+  const body = h('div', {});
+  app(body, h('div', { class: 'spl' }, SPACES.map(sp => h('button', { class: 'it' + (sp.id === SPID ? ' s' : ''), type: 'button', onclick: () => { m.close(); switchSpace(sp.id); } }, h('span', {}, (sp.kind === 'out' ? '🌳 ' : '🏠 ') + sp.name), sp.id === SPID ? h('small', {}, '현재') : null))),
+    h('div', { class: 'r' }, BTN('＋ 방 추가', () => { m.close(); addSpaceDlg('room'); }, 'b'), BTN('＋ 야외 추가', () => { m.close(); addSpaceDlg('out'); }, 'b'), BTN('📷 사진·도면으로', () => { m.close(); AI.openPhoto('room'); }, 'o')),
+    h('div', { class: 'r' }, BTN('공간 설정 열기', () => { m.close(); showTab('room'); if (mq.matches) setSheet('half'); }, 'c')));
+  const m = mdl('공간 — ' + projName, body);
+}
 $('ddm').append(h('div', { class: 'ddb' },
+  h('button', { id: 'ddspc', type: 'button', class: 'o', onclick: () => { $('dd').open = false; spaceMenu(); } }, '🏠 공간'),
   h('button', { id: 'ddacct', type: 'button', class: 'b', onclick: () => { $('dd').open = false; if (Cloud.user) { showTab('file'); if (mq.matches) setSheet('half'); } else gLogin(); } }, '☁ 로그인'),
   h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; setMMode(true); } }, '☑ 여러 개 선택 모드'),
   h('button', { type: 'button', class: 'o', onclick: () => { $('dd').open = false; startMarq(); } }, '▭ 영역으로 선택'),
@@ -2033,7 +2199,7 @@ function resolveLights(t) {
 }
 function resolveOps(t) { if (Array.isArray(t)) return t.flatMap(resolveOps); const s = String(t || '').replace(/\s/g, ''); return OPS.filter(o => opLabel(o) === s || String(o.id) === s.replace('#', '')); }
 function wallIdx(w) { if (w == null) return undefined; if (typeof w === 'number') return clamp(Math.round(w), 0, E.length - 1); const m = /(\d+)/.exec(String(w)); if (m) return clamp(+m[1] - 1, 0, E.length - 1); const map = { N: 0, E: 1, S: 2, W: 3, 뒷벽: 0, 오른쪽: 1, 앞벽: 2, 왼쪽: 3 }; for (const k in map) if (String(w).includes(k)) return Math.min(map[k], E.length - 1); return undefined; }
-const ITEM_KEYS = ['gid', 'name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
+const ITEM_KEYS = ['gid', 'body', 'desc', 'refs', 'refUse', 'face', 'skin', 'name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
 function applySet(it, set) {
   ITEM_KEYS.forEach(k => { if (set[k] !== undefined && set[k] !== null) it[k] = set[k]; });
   if (set.type && !TYPES[set.type]) it.type = 'box';
@@ -2091,13 +2257,19 @@ function runActions(actions = []) {
         if (R.lock && (s.shape || s.W || s.D || s.H)) log.push('🔒 방 모양·크기가 잠겨 있어 치수는 바꾸지 않음');
         if (s.shape && SHAPES.some(x => x[0] === s.shape)) applyShape(s.shape);
         if (s.W) setRoomDim('W', +s.W); if (s.D) setRoomDim('D', +s.D); if (s.H) setRoomDim('H', +s.H);
-        ['fl', 'flc', 'fld', 'wc', 'bb', 'view', 'vtime'].forEach(k => { if (s[k] != null) R[k] = s[k]; });
+        ['fl', 'flc', 'fld', 'wc', 'bb', 'view', 'vtime', 'env', 'gk', 'gc', 'desc'].forEach(k => { if (s[k] != null) R[k] = s[k]; }); if (s.env && ENV_DEF[s.env] && s.gk == null) { R.gk = ENV_DEF[s.env].g; R.gc = s.gc || ENV_DEF[s.env].gc; }
         if (s.wallColors) Object.entries(s.wallColors).forEach(([k, v]) => { const i = wallIdx(k); if (i != null) R.wcs[i] = v; });
         buildRoom(); log.push('🏠 방 설정 변경');
       }
       else if (op === 'addOpening') { const o = a.opening || a; const ex = {}; ['w', 'h', 'y', 's', 'fc', 'dc', 'hinge', 'sw', 'ang', 'open', 'wo', 'cur', 'cc', 'glass', 'view'].forEach(k => { if (o[k] != null) ex[k] = o[k]; }); const r = addOp(o.kind === 'door' ? 'door' : 'win', o.st || (o.kind === 'door' ? 'swing' : 'slide'), wallIdx(o.wall) ?? 0, ex); if (r) log.push(`🪟 ${opLabel(r)} 추가`); }
       else if (op === 'updateOpening') { const ts = resolveOps(a.target ?? a.targets), s = a.set || {}; ts.forEach(o => { const lk = o.lock && s.lock !== 0 && s.lock !== false; (lk ? ['ang', 'open', 'wo', 'cur', 'cc', 'view'] : ['w', 'h', 'y', 's', 'st', 'fc', 'dc', 'hinge', 'sw', 'ang', 'open', 'wo', 'cur', 'cc', 'glass', 'view', 'lock']).forEach(k => { if (s[k] != null) o[k] = s[k]; }); if (s.wall != null && !lk) o.wall = wallIdx(s.wall); clampOp(o); }); buildRoom(); log.push(`🪟 ${ts.map(opLabel).join(', ')} 변경`); }
       else if (op === 'deleteOpening') { const ts = resolveOps(a.target ?? a.targets).filter(o => !o.lock); OPS = OPS.filter(o => !ts.includes(o)); buildRoom(); log.push(`🗑 창호 ${ts.length}개 삭제`); }
+      else if (op === 'addSpace' || op === 'space') {
+        const kind = a.kind === 'outdoor' || a.kind === 'out' || a.env ? 'out' : 'room', W = +a.W || (kind === 'out' ? 1200 : 350), D = +a.D || (kind === 'out' ? 1000 : 330);
+        const st = kind === 'out' ? outdoorState(ENV_DEF[a.env] ? a.env : 'field', W, D) : roomState(W, D, +a.H || 230);
+        addSpace(a.name || (kind === 'out' ? '야외' : '방'), st); log.push(`＋ 공간 '${a.name || ''}' 추가 (${kind === 'out' ? '야외' : '방'})`);
+      }
+      else if (op === 'switchSpace') { const sp = SPACES.find(x => x.name === a.name || x.id === a.id); if (sp) { switchSpace(sp.id); log.push(`→ '${sp.name}'(으)로 이동`); } else log.push(`⚠ 공간 '${a.name}' 없음`); }
       else if (op === 'night') { setNight(a.value ? 1 : 0); log.push(a.value ? '🌙 야간 모드' : '☀ 주간 모드'); }
       else if (op === 'view') { view(a.value || 'iso'); }
       else if (op === 'clearItems') { items.forEach(i => { fG.remove(i.g); disposeTree(i.g); }); items = []; log.push('🗑 가구 모두 삭제'); }
@@ -2110,10 +2282,13 @@ function runActions(actions = []) {
 }
 function describe() {
   const P1 = v => rd(v);
+  const spc = SPACES.find(x => x.id === SPID) || {};
   return {
+    space: { name: spc.name, kind: R.kind === 'out' ? 'outdoor' : 'room', env: R.env, envName: R.kind === 'out' ? (ENVS.find(e => e[0] === R.env) || [])[1] : undefined, ground: R.kind === 'out' ? (GROUNDS.find(g => g[0] === (R.gk || (ENV_DEF[R.env] || {}).g)) || [])[1] : undefined, groundColor: R.gc, time: vtimeNow(), desc: R.desc },
+    spaces: SPACES.map(x => ({ name: x.name, kind: x.kind === 'out' ? 'outdoor' : 'room', current: x.id === SPID })),
     unit: 'cm', coord: 'x=왼쪽 외곽에서 가구 중심까지, z=뒤쪽 외곽에서 가구 중심까지, rot=반시계 회전(도, 위에서 볼 때). 시계방향 N° 회전은 drot:-N, 반시계 N°는 drot:N. 벽 번호는 1부터.',
     room: { W: R.W, D: R.D, H: R.H, locked: !!R.lock, shape: isRect(R.pts, R.bul) ? 'rect' : 'custom', area_m2: +(roomArea() / 10000).toFixed(2), floor: { type: R.fl, color: R.flc, dir: R.fld || 0 }, wallColor: R.wc, outsideView: R.view, viewTime: R.vtime, night: !!PREF.night, walls: E.map(e => ({ label: '벽' + (e.i + 1), from: e.a.map(P1), to: e.b.map(P1), len: P1(e.len), curved: !straight(e), color: R.wcs[e.i] || R.wc })) },
-    items: items.map(i => ({ label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
+    items: items.map(i => ({ desc: i.desc, body: i.body, refs: (i.refs || []).length || undefined, label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
     lights: LIGHTS.map(l => ({ label: lightLabel(l), kind: l.kind, kindName: (LKIND[l.kind] || {}).n, x: l.x != null && !lightIsWall(l) ? P1(l.x - BB.x0) : undefined, z: l.z != null && !lightIsWall(l) ? P1(l.z - BB.z0) : undefined, wall: lightIsWall(l) ? '벽' + (l.wall + 1) : undefined, on: l.on !== false, lum: l.lum ?? 1, temp: l.temp, lock: l.lock ? true : undefined })),
     openings: OPS.map(o => ({ label: opLabel(o), kind: o.kind, st: o.st, stName: (o.kind === 'win' ? WIN_ST : DOOR_ST).find(s => s[0] === o.st)?.[1], wall: '벽' + (o.wall + 1), s: P1(o.s), w: o.w, h: o.h, y: o.y, open: o.st === 'jung3' ? o.open || 0 : o.kind === 'win' ? o.wo || 0 : o.ang || 0, curtain: o.cur, lock: o.lock ? true : undefined })),
   };
@@ -2123,14 +2298,19 @@ const API = {
   CAT, TYPES, MATS, LKIND, WIN_ST, DOOR_ST, SHAPES, COLSTY, OUTFITS, HAIRS, POSES, VIEWS, FLOORS,
   describe, runActions, captureView, planCanvas, shot3D, toast, saveFile, fname, showTab, setSheet, h, BTN, F, G, app, isMobile,
   itemLabel, lightLabel, opLabel, grp, addPreset, placeNew, newItem, specToItem, saveCustom, saveLibDialog, renderCatalog, commit: () => commitSoon(0),
+  newSpace({ kind, env, W, D, H, name }) { const out = kind === 'outdoor' || kind === 'out'; const st = out ? outdoorState(ENV_DEF[env] ? env : 'field', +W || 1200, +D || 1000) : roomState(+W || 350, +D || 330, +H || 230); return addSpace(name || (out ? '야외' : '방'), st); },
   applyRoomSpec(spec) {
+    const pts = Array.isArray(spec.pts) && spec.pts.length >= 3 && spec.pts.every(p => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1])) ? spec.pts.map(p => [+p[0], +p[1]]) : null;
+    if (pts) { R.pts = orient(pts); R.bul = {}; normalizeRoom(); geo(); spec = { ...spec, W: 0, D: 0 }; }
+    ['fl', 'flc', 'wc', 'bb', 'view', 'vtime', 'env', 'gk', 'gc', 'desc'].forEach(k => { if (spec[k] != null && spec[k] !== '') R[k] = spec[k]; });
+    if (spec.env && ENV_DEF[spec.env] && !spec.gk) { R.gk = ENV_DEF[spec.env].g; if (!spec.gc) R.gc = ENV_DEF[spec.env].gc; }
     if (spec.W || spec.D) { if (spec.shape && SHAPES.some(x => x[0] === spec.shape)) { R.pts = shapePreset(spec.shape, +spec.W || R.W, +spec.D || R.D).pts; R.bul = {}; geo(); } else { R.pts = RECT(+spec.W || R.W, +spec.D || R.D); R.bul = {}; geo(); } }
     if (spec.H) R.H = +spec.H;
     if (Array.isArray(spec.openings)) { OPS = []; buildRoom(); spec.openings.forEach(o => runActions([{ op: 'addOpening', opening: o }])); }
     buildRoom(); items.forEach(i => fit(i, false)); LIGHTS.forEach(placeLight); renderRoom(); upd(); fitView();
   },
   floorName: k => (FLOORS.find(f => f[0] === k) || [])[1], matName: k => MATN[k || ''] || '',
-  LS, cloudSettingsSoon, onLogin, renderFile, renderAccount,
+  LS, cloudSettingsSoon, onLogin, renderFile, renderAccount, renderRoom, renderSel,
 };
 const AI = initAI(API);
 window.__room3d = Object.defineProperties(Object.create(API), Object.getOwnPropertyDescriptors({ scene, THREE, get cam() { return cam; }, scr(x, y, z) { const v = new THREE.Vector3(x, y, z).project(cam), r = cv.getBoundingClientRect(); return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; }, get SZ() { return SZ; }, get LIB() { return LIB; }, get CUSTOM() { return CUSTOM; }, catManager, libItemDialog, addOp, addLight, setSel, view, undo, redo, setRoom: setRoomDim, applyShape, insertVertex, chamfer, drawPlan: planCanvas }));
