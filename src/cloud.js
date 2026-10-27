@@ -2,7 +2,7 @@
 // 구조: users/{uid}/projects/{id} · users/{uid}/meta/settings · users/{uid}/meta/aikeys · users/{uid}/gallery/{id}
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot } from 'firebase/firestore';
 
 import FILE_CFG from './firebase.config.js';
 
@@ -51,6 +51,7 @@ export const Cloud = {
   cfg: loadCfg(), error: '',
   init() {
     this.cfg = loadCfg();
+    if (globalThis.__CLOUD_MOCK) { const M = globalThis.__CLOUD_MOCK; Object.assign(this, M.methods); db = {}; user = M.user; ready = true; setTimeout(emit, 50); return true; } // 자동 테스트 전용
     if (!this.cfg.apiKey || !this.cfg.appId) { this.error = 'Firebase 웹 앱 설정(apiKey, appId)이 없습니다'; ready = true; emit(); return false; }
     try {
       const { databaseId, ...c } = this.cfg;
@@ -72,7 +73,10 @@ export const Cloud = {
   async logout() { await signOut(auth); },
   // 프로젝트
   async listProjects() { const s = await getDocs(collection(db, 'users', user.uid, 'projects')); return s.docs.map(d => ({ id: d.id, ...d.data() })); },
-  async saveProject(name, state, t) { await setDoc(doc(db, 'users', user.uid, 'projects', pid(name)), { name, t: t || Date.now(), data: JSON.stringify(state) }); },
+  async saveProject(name, state, t, dev) { await setDoc(doc(db, 'users', user.uid, 'projects', pid(name)), { name, t: t || Date.now(), dev: dev || '', data: JSON.stringify(state) }); },
+  async getProject(name) { const d = await getDoc(doc(db, 'users', user.uid, 'projects', pid(name))); return d.exists() ? d.data() : null; },
+  // 다른 기기에서 저장하면 실시간으로 알려 줌
+  watchProjects(cb) { return onSnapshot(collection(db, 'users', user.uid, 'projects'), snap => cb(snap.docChanges().map(c => ({ type: c.type, ...c.doc.data() }))), e => console.warn('watch', e)); },
   async deleteProject(name) { await deleteDoc(doc(db, 'users', user.uid, 'projects', pid(name))); },
   // 설정 / AI 키
   async getMeta(k) { const s = await getDoc(doc(db, 'users', user.uid, 'meta', k)); return s.exists() ? s.data() : null; },

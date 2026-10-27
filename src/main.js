@@ -590,31 +590,127 @@ function flush() { if (ct) { clearTimeout(ct); commit(); } }
 function undo() { flush(); if (hi <= 0) return toast('더 이상 되돌릴 수 없습니다'); hi--; load(JSON.parse(hist[hi]), true); saveProj(hist[hi]); updUndo(); }
 function redo() { flush(); if (hi >= hist.length - 1) return; hi++; load(JSON.parse(hist[hi]), true); saveProj(hist[hi]); updUndo(); }
 function updUndo() { $('undo').disabled = hi <= 0; $('redo').disabled = hi >= hist.length - 1; }
-let cloudQ = {}, cloudT = null, syncState = 'local';
-function saveProj(s) { const t = Date.now(); PROJ[projName] = { t, s: JSON.parse(s) }; LS.set(K_PROJ, PROJ); LS.set(K_CUR, projName); if (Cloud.user) { cloudQ[projName] = t; cloudFlushSoon(); } }
-function cloudFlushSoon() { setSync('saving'); clearTimeout(cloudT); cloudT = setTimeout(cloudFlush, 1500); }
-async function cloudFlush() {
-  if (!Cloud.user) return; const q = cloudQ; cloudQ = {};
-  try { for (const n of Object.keys(q)) { if (PROJ[n]) await Cloud.saveProject(n, PROJ[n].s, PROJ[n].t); else await Cloud.deleteProject(n); } setSync('ok'); }
-  catch (e) { cloudQ = { ...q, ...cloudQ }; setSync('err', e.message); }
+// ── 저장·동기화 ──
+// PROJ[이름] = { t: 마지막 편집, s: 상태, ct: 이 사본의 기준이 된 클라우드 저장 시각, dirty: 클라우드에 아직 안 올린 편집 }
+const DEV = (() => { let d = LS.get('room3d.v2.dev', ''); if (!d) { d = Math.random().toString(36).slice(2, 10); LS.set('room3d.v2.dev', d); } return d; })();
+const K_OPENED = 'room3d.v2.openedAt';
+let cloudQ = {}, cloudT = null, syncState = 'local', lastSaved = 0, unwatch = null;
+const sameS = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const hhmm = (t = Date.now()) => { const d = new Date(t); return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0'); };
+function persist() { LS.set(K_PROJ, PROJ); LS.set(K_CUR, projName); }
+// quiet: 프로젝트를 연 직후(편집 아님) — 클라우드에 올릴 '변경'으로 치지 않음
+function saveProj(s, quiet) {
+  const p = PROJ[projName], ns = JSON.parse(s);
+  if (p && sameS(p.s, ns)) { persist(); return; }
+  if (quiet) { if (p) p.s = ns; else PROJ[projName] = { t: 0, s: ns, dirty: 0 }; persist(); return; }
+  PROJ[projName] = { ...(p || {}), t: Date.now(), s: ns, dirty: 1 }; persist();
+  if (Cloud.user) { cloudQ[projName] = 1; cloudFlushSoon(); } else setSync('local');
 }
-function setSync(s, m) { syncState = s; const el = $('sync'); if (!el) return; el.className = 'sync ' + s; el.title = { local: '로그인하지 않음 — 이 브라우저에만 저장', saving: '클라우드에 저장 중…', ok: '클라우드에 저장됨', err: '클라우드 저장 실패: ' + (m || '') }[s]; el.querySelector('.t').textContent = { local: '로컬', saving: '저장 중', ok: '저장됨', err: '오류' }[s]; }
+function cloudFlushSoon() { setSync('saving'); clearTimeout(cloudT); cloudT = setTimeout(cloudFlush, 1200); }
+async function cloudFlush() {
+  if (!Cloud.user) return; clearTimeout(cloudT); const q = cloudQ; cloudQ = {};
+  try {
+    for (const n of Object.keys(q)) {
+      const p = PROJ[n];
+      if (!p) { await Cloud.deleteProject(n); continue; }
+      if (!p.dirty) continue;
+      const remote = await Cloud.getProject(n);
+      if (remote && remote.t !== p.ct && remote.dev !== DEV && !sameS(JSON.parse(remote.data || 'null'), p.s)) {
+        // 그 사이 다른 기기가 같은 프로젝트를 저장함 → 어느 쪽도 잃지 않게: 클라우드 것을 원본으로, 이 기기 편집은 복사본으로
+        const copy = uniq(`${n} (이 기기 ${hhmm()})`), t = Date.now();
+        await Cloud.saveProject(copy, p.s, t, DEV); PROJ[copy] = { t, s: p.s, ct: t, dirty: 0 };
+        PROJ[n] = { t: remote.t, s: JSON.parse(remote.data), ct: remote.t, dirty: 0 };
+        if (n === projName) openProject(n, null, true);
+        toast(`다른 기기에서 '${n}'을(를) 먼저 저장해서, 이 기기에서 바꾼 내용은 '${copy}'(으)로 따로 저장했습니다`, 9000);
+        continue;
+      }
+      const t = Date.now(); await Cloud.saveProject(n, p.s, t, DEV);
+      if (n === projName) Cloud.setMeta('last', { name: n, at: t, dev: DEV, kind: isMobile() ? '휴대폰' : 'PC' }).catch(() => { });
+      const cur = PROJ[n]; if (cur) { cur.ct = t; if (cur === p) { cur.t = t; cur.dirty = 0; } }
+    }
+    persist(); lastSaved = Date.now(); setSync('ok'); if (!$('t-file').hidden) renderFile();
+  } catch (e) { cloudQ = { ...q, ...cloudQ }; setSync('err', e.message); }
+}
+// 💾 지금 저장 (자동 저장도 되지만 눌러서 바로 확정)
+async function saveNow() {
+  flush(); const p = PROJ[projName]; persist();
+  if (!Cloud.user) return toast(Cloud.enabled ? '이 기기에 저장했습니다 — 로그인하면 클라우드에도 저장되어 PC·휴대폰 어디서나 열 수 있습니다' : '이 기기에 저장했습니다 (클라우드 연결 전)', 5000);
+  if (p && (p.dirty || p.ct === undefined)) { p.dirty = 1; cloudQ[projName] = 1; }
+  setSync('saving'); await cloudFlush();
+  if (syncState === 'ok') Cloud.setMeta('last', { name: projName, at: Date.now(), dev: DEV, kind: isMobile() ? '휴대폰' : 'PC' }).catch(() => { });
+  toast(syncState === 'ok' ? `☁ '${projName}' 클라우드에 저장했습니다 (${hhmm()})` : '클라우드 저장 실패 — 인터넷 연결을 확인하세요', 4000);
+}
+// 다른 기기에서 저장/삭제한 내용을 실시간 반영
+function onRemote(changes) {
+  let cur = false, other = null;
+  for (const c of changes) {
+    if (!c.name || c.dev === DEV) continue;
+    const loc = PROJ[c.name];
+    if (c.type === 'removed') { if (loc && !loc.dirty && loc.ct !== undefined) { delete PROJ[c.name]; if (c.name === projName) cur = 'gone'; } continue; }
+    if (loc && loc.ct === c.t) continue;
+    let rs; try { rs = JSON.parse(c.data); } catch (e) { continue; }
+    if (loc && loc.dirty) continue; // 이 기기에도 안 올린 편집이 있으면 저장 시점에 복사본으로 처리
+    PROJ[c.name] = { t: c.t, s: rs, ct: c.t, dirty: 0 }; if (c.name === projName) cur = true; else other = c.name;
+  }
+  persist();
+  if (other && !cur) toast(`☁ 다른 기기에서 '${other}'을(를) 저장했습니다`, 8000, ['열기', () => openProject(other)]);
+  if (cur === 'gone') { openProject(Object.keys(PROJ)[0] || '내 방'); toast('다른 기기에서 이 프로젝트를 삭제했습니다'); }
+  else if (cur) { const keep = sel && sel.o && sel.o.id; openProject(projName, null, true); if (keep) { const it = items.find(i => i.id === keep); if (it) setSel({ k: 'item', o: it }); } toast('☁ 다른 기기에서 저장한 내용으로 업데이트했습니다', 3500); }
+  if (!$('t-file').hidden) renderFile();
+}
+addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveNow(); } });
+// 앱 전환·화면 끄기 직전에 바로 올리기 (모바일)
+let lastPull = 0;
+async function pullNow(force) { if (!Cloud.user || (!force && Date.now() - lastPull < 4000)) return; lastPull = Date.now(); flush(); if (Object.keys(cloudQ).length) await cloudFlush(); await onLogin(Cloud.user, !force); }
+document.addEventListener('visibilitychange', () => { if (document.hidden) { flush(); if (Cloud.user && Object.keys(cloudQ).length) cloudFlush(); } else pullNow(); });
+addEventListener('pageshow', e => { if (e.persisted) pullNow(); });
+function setSync(s, m) { syncState = s; const el = $('sync'); if (!el) return; if (!el.onclick) el.onclick = () => saveNow(); el.className = 'sync ' + s; el.title = { local: '이 기기에만 저장됨 — 눌러서 저장 (로그인하면 클라우드)', saving: '클라우드에 저장 중…', ok: '클라우드에 저장됨', err: '클라우드 저장 실패: ' + (m || '') }[s]; el.querySelector('.t').textContent = { local: '저장', saving: '저장 중', ok: '저장됨', err: '오류' }[s]; }
 let setT = null;
 function cloudSettingsSoon() { if (!Cloud.user) return; clearTimeout(setT); setT = setTimeout(() => Cloud.setMeta('settings', { sizes: SZ, custom: JSON.stringify(CUSTOM), prefs: JSON.stringify({ ...PREF, tab: undefined }), recent: RECENT }).catch(e => setSync('err', e.message)), 1200); }
-async function onLogin(u) {
-  renderFile(); renderAccount();
+async function onLogin(u, quiet) {
+  if (!quiet) { renderFile(); renderAccount(); }
+  if (unwatch) { unwatch(); unwatch = null; }
   if (!u) { setSync('local'); return; }
-  setSync('saving');
+  if (!quiet) setSync('saving');
   try {
-    const list = await Cloud.listProjects(), names = new Set();
-    for (const p of list) { names.add(p.name); const loc = PROJ[p.name]; if (!loc || (p.t || 0) > (loc.t || 0)) { try { PROJ[p.name] = { t: p.t, s: JSON.parse(p.data) }; } catch (e) { } } else if ((loc.t || 0) > (p.t || 0)) cloudQ[p.name] = loc.t; }
-    Object.keys(PROJ).forEach(n => { if (!names.has(n)) cloudQ[n] = PROJ[n].t; });
-    LS.set(K_PROJ, PROJ);
+    flush();
+    const list = await Cloud.listProjects(), names = new Set(), backups = []; let changedCur = false;
+    for (const r of list) {
+      let rs; try { rs = JSON.parse(r.data); } catch (e) { continue; }
+      names.add(r.name); const loc = PROJ[r.name];
+      if (!loc) { PROJ[r.name] = { t: r.t, s: rs, ct: r.t, dirty: 0 }; continue; }
+      if (sameS(loc.s, rs)) { loc.ct = r.t; loc.dirty = 0; continue; }
+      if (loc.ct === r.t && !loc.dirty) continue; // 같은 클라우드 버전 (열 때 정리된 차이뿐)
+      const legacy = loc.ct === undefined && loc.dirty === undefined;
+      if (!loc.dirty && !legacy) { PROJ[r.name] = { t: r.t, s: rs, ct: r.t, dirty: 0 }; if (r.name === projName) changedCur = true; continue; }
+      if (loc.dirty && loc.ct === r.t) { cloudQ[r.name] = 1; continue; } // 이 기기 편집만 있음 → 올리기
+      // 양쪽 다 바뀜(또는 예전 버전 데이터) → 클라우드 것을 원본으로, 이 기기 것은 백업 복사본
+      const copy = uniq(`${r.name} (이 기기 백업)`); PROJ[copy] = { t: loc.t || Date.now(), s: loc.s, dirty: 1 }; cloudQ[copy] = 1; backups.push(copy);
+      PROJ[r.name] = { t: r.t, s: rs, ct: r.t, dirty: 0 }; if (r.name === projName) changedCur = true;
+    }
+    Object.keys(PROJ).forEach(n => {
+      if (names.has(n)) return; const p = PROJ[n];
+      if (p.ct !== undefined && !p.dirty) { delete PROJ[n]; if (n === projName) changedCur = true; } // 다른 기기에서 삭제됨
+      else if (p.dirty || (p.ct === undefined && p.dirty === undefined)) { p.dirty = 1; cloudQ[n] = 1; }
+    });
+    persist();
     const st = await Cloud.getMeta('settings');
     if (st) { SZ = { ...SZ, ...(st.sizes || {}) }; LS.set(K_SZ, SZ); try { const cu = JSON.parse(st.custom || '[]'); cu.forEach(p => { if (!CUSTOM.some(c => c[0] === p[0])) CUSTOM.push(p); }); LS.set(K_CUS, CUSTOM); } catch (e) { } }
     await AI.onLogin();
-    if (PROJ[projName]) { const loc = JSON.stringify(PROJ[projName].s); if (loc !== hist[hi]) openProject(projName); }
-    renderCatalog(); renderFile(); await cloudFlush(); setSync('ok'); toast('클라우드에 연결되었습니다');
+    // 지금 화면이 손대지 않은 예시 방이거나 없어졌으면 → 클라우드에서 가장 최근에 저장한 프로젝트 열기
+    const cp = PROJ[projName], pristine = !cp || (!cp.dirty && cp.ct === undefined);
+    const latest = list.filter(r => PROJ[r.name]).sort((a, b) => (b.t || 0) - (a.t || 0))[0];
+    // 다른 기기(PC 등)에서 마지막으로 작업·저장한 프로젝트가 이 기기에서 연 것보다 최근이면 그걸 연다
+    let last = null; try { last = await Cloud.getMeta('last'); } catch (e) { }
+    const follow = last && last.dev !== DEV && last.name !== projName && PROJ[last.name] && (last.at || 0) > Math.max(LS.get(K_OPENED, 0), (cp && cp.t) || 0) && !(cp && cp.dirty);
+    if (follow) { openProject(last.name); toast(`☁ ${last.kind || '다른 기기'}에서 마지막으로 저장한 '${last.name}' (${hhmm(last.at)})을 열었습니다`, 5000); }
+    else if (pristine && latest && latest.name !== projName) { openProject(latest.name); toast(`☁ 클라우드에서 '${latest.name}' (${hhmm(latest.t)} 저장)을 열었습니다`, 4000); }
+    else if (!PROJ[projName]) openProject(Object.keys(PROJ)[0] || '내 방');
+    else if (changedCur) { openProject(projName, null, true); toast(`☁ 다른 기기에서 저장한 '${projName}'을(를) 불러왔습니다`, 4000); }
+    renderCatalog(); await cloudFlush(); setSync('ok'); renderFile();
+    if (backups.length) toast(`이 기기에만 있던 다른 내용은 ${backups.map(b => `'${b}'`).join(', ')}(으)로 보관했습니다`, 9000);
+    else if (!changedCur && !pristine && !follow && !quiet) toast('클라우드에 연결되었습니다');
+    unwatch = Cloud.watchProjects(onRemote);
   } catch (e) { setSync('err', e.message); toast('클라우드 오류: ' + e.message); }
 }
 function normItem(i) { return { y: 0, rot: 0, type: 'box', color: '#b0a090', ...i, bw: i.bw || i.w, bd: i.bd || i.d, bh: i.bh || i.h }; }
@@ -632,10 +728,10 @@ function load(st0, keepSel) {
   if (keepSel && sk) { const pool = sk[0] === 'item' ? items : sk[0] === 'op' ? OPS : LIGHTS, o = pool.find(x => x.id === sk[1]); if (o) s = { k: sk[0], o }; }
   setSel(s); check(); dims(); renderRoom(); renderLights(); markList(); updArea(); renderFile();
 }
-function openProject(name, fresh) {
-  flush(); projName = name;
+function openProject(name, fresh, keepView) {
+  flush(); if (name !== projName) LS.set(K_OPENED, Date.now()); projName = name;
   const p = PROJ[name]; const st = fresh || (p && p.s) || exampleState();
-  load(st); hist = []; hi = -1; commit(); updUndo(); fitView();
+  load(st); hist = [JSON.stringify(snap())]; hi = 0; saveProj(hist[0], !fresh); updUndo(); if (!keepView) fitView();
 }
 
 // ---------- 추가 ----------
@@ -1002,7 +1098,7 @@ const G = (n, ...k) => h('div', { class: 'g', style: `grid-template-columns:repe
 const BTN = (t, fn, cls = 'o', title) => h('button', { class: cls, onclick: fn, title, type: 'button' }, t);
 function syncSel() { BIND = BIND.filter(([i]) => i.isConnected); BIND.forEach(([i, s]) => { if (i !== document.activeElement) s(); }); }
 let tt = null;
-function toast(t, ms = 2800) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(tt); tt = setTimeout(() => { el.hidden = true; }, ms); }
+function toast(t, ms = 2800, act) { const el = $('toast'); el.textContent = t; if (act) { el.append(' ', h('button', { class: 'tact', type: 'button', onclick: e => { e.stopPropagation(); el.hidden = true; act[1](); } }, act[0])); ms = Math.max(ms, 8000); } el.hidden = false; clearTimeout(tt); tt = setTimeout(() => { el.hidden = true; }, ms); }
 const fname = s => (projName + '_' + s).replace(/[\\/:*?"<>|\s]+/g, '_');
 
 // ---------- 모바일 시트 ----------
@@ -1013,10 +1109,69 @@ mq.addEventListener ? mq.addEventListener('change', layout) : mq.addListener(lay
 function sheetPx(s) { const vh = window.innerHeight; return s === 'peek' ? 104 : s === 'full' ? Math.round(vh * 0.9) : Math.round(vh * 0.5); }
 function setSheet(s, px) { sheetState = s; const v = px ?? sheetPx(s); document.documentElement.style.setProperty('--sh', v + 'px'); document.body.dataset.sheet = s; setTimeout(rsz, 260); }
 (() => {
-  const g = $('grab'); let st = null;
-  g.addEventListener('pointerdown', e => { st = { y: e.clientY, h: sheetPx(sheetState), t: Date.now() }; g.setPointerCapture(e.pointerId); document.body.classList.add('sheet-drag'); });
-  g.addEventListener('pointermove', e => { if (!st) return; const v = clamp(st.h - (e.clientY - st.y), 90, window.innerHeight * 0.94); document.documentElement.style.setProperty('--sh', v + 'px'); });
-  g.addEventListener('pointerup', e => { if (!st) return; document.body.classList.remove('sheet-drag'); const dy = e.clientY - st.y, v = st.h - dy; if (Math.abs(dy) < 6 && Date.now() - st.t < 300) setSheet(sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek'); else { const opts = ['peek', 'half', 'full'].map(s => [s, Math.abs(sheetPx(s) - v)]).sort((a, b) => a[1] - b[1]); setSheet(opts[0][0]); } st = null; });
+  // 시트 끌기: 손잡이 + 탭 줄 전체(세로로 끌면 시트, 가로로 밀면 탭 스크롤, 탭하면 탭 전환)
+  const g = $('grab'), tabs = $('tabs'), P = $('p'); let st = null;
+  const H = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sh')) || sheetPx(sheetState);
+  const begin = (y, x, src) => { st = { y, x, h: H(), t: Date.now(), src, on: src === 'grab', last: y, lt: Date.now(), vy: 0 }; if (st.on) document.body.classList.add('sheet-drag'); };
+  const move = (y, x) => {
+    if (!st) return false; const dy = y - st.y, dx = x - st.x;
+    if (!st.on) { if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx) * 1.2) { st.on = true; st.y = y; st.h = H(); document.body.classList.add('sheet-drag'); } else return false; }
+    const now = Date.now(); st.vy = (y - st.last) / Math.max(1, now - st.lt); st.last = y; st.lt = now;
+    document.documentElement.style.setProperty('--sh', clamp(st.h - (y - st.y), 90, window.innerHeight * 0.94) + 'px'); return true;
+  };
+  const end = y => {
+    if (!st) return; const was = st; st = null; document.body.classList.remove('sheet-drag');
+    if (!was.on) { if (was.src === 'grab' && Date.now() - was.t < 300) setSheet(sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek'); return; }
+    const dy = y - was.y; if (was.src === 'grab' && Math.abs(dy) < 6 && Date.now() - was.t < 300) { setSheet(sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek'); return; }
+    const v = was.h - dy, opts = ['peek', 'half', 'full'];
+    let pick = opts.reduce((a, b) => Math.abs(sheetPx(b) - v) < Math.abs(sheetPx(a) - v) ? b : a);
+    if (Math.abs(was.vy) > 0.5) { const k = opts.indexOf(sheetState); pick = opts[clamp(k + (was.vy < 0 ? 1 : -1), 0, 2)]; }
+    setSheet(pick); was.moved = true; if (was.src === 'tabs') { tabs._noClick = Date.now(); }
+  };
+  // 손잡이·탭 줄은 터치 이벤트로 직접 처리 (브라우저가 화면 전체를 움직이지 못하게)
+  const T = (el, src) => {
+    el.addEventListener('touchstart', e => { if (!mq.matches || e.touches.length > 1) return; const t = e.touches[0]; begin(t.clientY, t.clientX, src); }, { passive: true });
+    el.addEventListener('touchmove', e => { if (!st) return; const t = e.touches[0]; if (move(t.clientY, t.clientX) || src === 'grab') e.preventDefault(); }, { passive: false });
+    el.addEventListener('touchend', e => { const t = e.changedTouches[0]; end(t.clientY); }, { passive: true });
+    el.addEventListener('touchcancel', () => end(st ? st.y : 0), { passive: true });
+  };
+  T(g, 'grab'); T(tabs, 'tabs');
+  tabs.addEventListener('click', e => { if (tabs._noClick && Date.now() - tabs._noClick < 350) { e.stopPropagation(); e.preventDefault(); } }, true);
+  // 마우스(데스크톱 창을 좁힌 경우)
+  g.addEventListener('mousedown', e => { if (!mq.matches) return; begin(e.clientY, e.clientX, 'grab'); const mm = ev => move(ev.clientY, ev.clientX), mu = ev => { removeEventListener('mousemove', mm); removeEventListener('mouseup', mu); end(ev.clientY); }; addEventListener('mousemove', mm); addEventListener('mouseup', mu); });
+  // 내용이 맨 위일 때 아래로 당기면 시트 내리기
+  let pull = null;
+  P.addEventListener('touchstart', e => { if (!mq.matches || e.touches.length > 1 || e.target.closest('#grab,#tabs')) return; const sec = e.target.closest('#p>section'); if (!sec) return; const t = e.touches[0]; pull = { sec, y: t.clientY, x: t.clientX, top: sec.scrollTop <= 0, act: false }; }, { passive: true });
+  P.addEventListener('touchmove', e => {
+    if (!pull) return; const t = e.touches[0], dy = t.clientY - pull.y, dx = t.clientX - pull.x;
+    if (!pull.act) { if (pull.top && pull.sec.scrollTop <= 0 && dy > 10 && dy > Math.abs(dx) * 1.5 && !e.target.closest('input[type=range],.hs,textarea,.chatlog')) { pull.act = true; begin(t.clientY, t.clientX, 'pull'); st.on = true; document.body.classList.add('sheet-drag'); } else return; }
+    e.preventDefault(); move(t.clientY, t.clientX);
+  }, { passive: false });
+  P.addEventListener('touchend', e => { if (pull && pull.act) end(e.changedTouches[0].clientY); pull = null; }, { passive: true });
+})();
+// 모바일: 페이지 전체가 밀리거나 튕기지 않게 — 스크롤 가능한 영역 밖의 터치 이동은 막는다
+(() => {
+  const scrollable = (el, dy, dx) => {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      if (n.id === 'c' || n.tagName === 'CANVAS') return true; // 3D 화면은 자체 처리(touch-action:none)
+      if (n.matches && n.matches('input[type=range]')) return true;
+      const cs = getComputedStyle(n);
+      if (Math.abs(dy) >= Math.abs(dx)) { if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 1) { if ((dy > 0 && n.scrollTop > 0) || (dy < 0 && n.scrollTop + n.clientHeight < n.scrollHeight - 1)) return true; } }
+      else if (/(auto|scroll)/.test(cs.overflowX) && n.scrollWidth > n.clientWidth + 1) return true;
+    }
+    return false;
+  };
+  let sy = 0, sx = 0;
+  document.addEventListener('touchstart', e => { if (e.touches.length === 1) { sy = e.touches[0].clientY; sx = e.touches[0].clientX; } }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (!document.body.classList.contains('mob') || e.touches.length > 1 || e.defaultPrevented) return;
+    const t = e.touches[0]; if (!scrollable(e.target, t.clientY - sy, t.clientX - sx)) e.preventDefault();
+  }, { passive: false });
+  // 키보드가 닫히거나 화면이 밀린 뒤 원위치
+  const reset = () => { if (document.body.classList.contains('mob') && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0); };
+  document.addEventListener('focusout', () => setTimeout(reset, 60));
+  window.addEventListener('scroll', () => { if (!document.activeElement || !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) reset(); }, { passive: true });
+  if (window.visualViewport) visualViewport.addEventListener('resize', () => setTimeout(reset, 80));
 })();
 window.addEventListener('resize', () => { if (mq.matches) setSheet(sheetState); });
 
@@ -1382,6 +1537,17 @@ function renderAccount() {
   else el.append(h('div', { class: 'acct' }, h('span', { class: 'mu' }, '로그인하면 모든 기기에서 이어서 작업'), BTN('Google 로그인', gLogin, 'b')));
   const mb = $('ddacct'); if (mb) mb.textContent = Cloud.user ? '☁ ' + (Cloud.user.email || '로그인됨') : '☁ 로그인';
 }
+// 현재 프로젝트 저장 상태 + 💾 저장 버튼
+function projStatus() {
+  const p = PROJ[projName] || {};
+  const st = !Cloud.user ? (Cloud.enabled ? '이 기기에만 저장됨 · 로그인하면 클라우드에도 저장' : '이 기기에만 저장됨')
+    : syncState === 'saving' || p.dirty ? '클라우드에 올리는 중…'
+    : syncState === 'err' ? '⚠ 클라우드 저장 실패 — 다시 저장을 눌러 주세요'
+    : p.ct ? `☁ 클라우드에 저장됨 · ${hhmm(p.ct)}` : '아직 클라우드에 저장 안 됨';
+  return h('div', { class: 'box savebox' },
+    h('div', { class: 'r' }, BTN('💾 저장', saveNow, 'b big'), h('span', { class: 'sm ' + (syncState === 'err' ? 'warn' : 'mu') }, st)),
+    h('p', { class: 'mu sm' }, '바꿀 때마다 자동 저장되며, 로그인하면 클라우드에 올라가 다른 기기에서도 실시간으로 반영됩니다. (단축키 Ctrl+S)'));
+}
 // 저장 탭의 계정 영역: 연결 전 / 로그인 전 / 로그인 후
 function loginBlock(cfgTa, em, pw) {
   const emailRow = () => [h('p', { class: 'mu sm' }, '또는 이메일로'), G(2, em, pw),
@@ -1400,7 +1566,7 @@ function loginBlock(cfgTa, em, pw) {
   const tools = h('details', {}, h('summary', {}, 'Firebase 설정 변경 · 설정 파일 코드'), cfgTa,
     h('div', { class: 'r' }, BTN('설정 저장 후 다시 연결', () => AI.saveFirebase(cfgTa.value)), BTN('보안 규칙 복사', () => AI.copyRules()), BTN('설정 파일 코드 복사 (firebase.config.js)', () => AI.copyCfgFile())));
   const link = BTN('📱 다른 기기 연결 (QR)', () => AI.openLink());
-  if (Cloud.user) return h('div', {}, h('div', { class: 'box' }, h('p', {}, `로그인: ${Cloud.user.email || Cloud.user.displayName}`), h('p', { class: 'mu sm' }, `프로젝트·내 크기·내 가구·AI 키·갤러리가 클라우드(${Cloud.cfg.databaseId})에 자동 저장되고, 다른 기기에서 같은 계정으로 로그인하면 자동으로 불러옵니다.`), h('div', { class: 'r' }, BTN('지금 동기화', () => onLogin(Cloud.user), 'b'), link, BTN('로그아웃', () => Cloud.logout()))), tools);
+  if (Cloud.user) return h('div', {}, h('div', { class: 'box' }, h('p', {}, `로그인: ${Cloud.user.email || Cloud.user.displayName}`), h('p', { class: 'mu sm' }, `프로젝트·내 크기·내 가구·AI 키·갤러리가 클라우드(${Cloud.cfg.databaseId})에 자동 저장되고, 다른 기기에서 같은 계정으로 로그인하면 자동으로 불러옵니다.`), h('div', { class: 'r' }, BTN('🔄 클라우드에서 다시 불러오기', () => pullNow(true)), link, BTN('로그아웃', () => Cloud.logout()))), tools);
   return h('div', {}, h('div', { class: 'box login' }, h('div', { class: 'r' }, BTN('Google 계정으로 로그인', gLogin, 'b big')), ...emailRow(), h('div', { class: 'r' }, link)), tools);
 }
 function renderFile() {
@@ -1411,14 +1577,16 @@ function renderFile() {
   const em = h('input', { type: 'email', placeholder: '이메일', autocomplete: 'email' }), pw = h('input', { type: 'password', placeholder: '비밀번호 (6자 이상)', autocomplete: 'current-password' });
   const cfgTa = h('textarea', { rows: 5, placeholder: 'Firebase 콘솔 → 프로젝트 설정 → 내 앱(웹)의 firebaseConfig 코드를 그대로 붙여넣기' });
   app(b,
+    h('h3', {}, `💾 저장 — ${projName}`),
+    projStatus(),
     h('h3', {}, '☁ 클라우드 계정'),
     loginBlock(cfgTa, em, pw),
-    h('h3', {}, '프로젝트 (자동 저장)'),
+    h('h3', {}, '프로젝트'),
     F('현재 프로젝트', bsel(names.map(n => [n, n]), () => projName, v => { if (v !== projName) { openProject(v); } })),
     h('div', { class: 'r' },
       BTN('+ 새 프로젝트', () => { const n = uniq(prompt('새 프로젝트 이름', '새 방') || ''); if (!n) return; const empty = confirm('빈 방으로 시작할까요?\n(취소를 누르면 예시 가구가 들어간 방으로 시작)'); openProject(n, empty ? emptyState() : exampleState()); renderFile(); }, 'b'),
       BTN('다른 이름으로 저장', () => { const n = uniq(prompt('저장할 이름', projName + ' 복사본') || ''); if (!n) return; flush(); const s = snap(); openProject(n, s); renderFile(); toast(`'${n}'(으)로 저장했습니다`); }),
-      BTN('이름 변경', () => { const n = (prompt('새 이름', projName) || '').trim(); if (!n || n === projName) return; if (PROJ[n]) return toast('같은 이름이 있습니다'); PROJ[n] = PROJ[projName]; delete PROJ[projName]; if (Cloud.user) { cloudQ[projName] = 0; cloudQ[n] = PROJ[n].t; cloudFlushSoon(); } projName = n; LS.set(K_PROJ, PROJ); LS.set(K_CUR, n); renderFile(); }),
+      BTN('이름 변경', () => { const n = (prompt('새 이름', projName) || '').trim(); if (!n || n === projName) return; if (PROJ[n]) return toast('같은 이름이 있습니다'); PROJ[n] = { ...PROJ[projName], ct: undefined, dirty: 1 }; delete PROJ[projName]; if (Cloud.user) { cloudQ[projName] = 1; cloudQ[n] = 1; cloudFlushSoon(); } projName = n; LS.set(K_PROJ, PROJ); LS.set(K_CUR, n); renderFile(); }),
       BTN('삭제', () => { if (Object.keys(PROJ).length <= 1) return toast('마지막 프로젝트는 삭제할 수 없습니다'); if (!confirm(`'${projName}' 프로젝트를 삭제할까요?`)) return; delete PROJ[projName]; if (Cloud.user) { cloudQ[projName] = 0; cloudFlushSoon(); } LS.set(K_PROJ, PROJ); openProject(Object.keys(PROJ)[0]); renderFile(); })),
     h('h3', {}, '파일로 저장·불러오기'),
     h('div', { class: 'r' }, BTN('JSON 파일로 내보내기', exportJSON, 'b'), BTN('JSON 파일 가져오기', () => fi.click()), fi),
