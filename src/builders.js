@@ -17,7 +17,7 @@ export const LEAF = { sq: 0.5, wings: 0.5, half: 0.55 };
 export const NOPT = {
   shelfW: '단 수', shelfM: '단 수', shelfC: '단 수', shelfR: '단 수', bookcase: '단 수', rack: '단 수',
   wshelf: '단 수', ladder: '단 수', vitrine: '단 수', cab: '문 개수', drawer: '서랍 단수', fridge: '도어 수',
-  frame: '액자 개수', monitor: '모니터 대수', kitchen: '도어 수', screen: '패널 수',
+  frame: '액자 개수', monitor: '모니터 대수', kitchen: '도어 수', screen: '패널 수', mshelf: '단 수',
 };
 
 // 보조색 기본값
@@ -42,7 +42,7 @@ export const TYPES = {
   flamp: '장스탠드', arcLamp: '아크 스탠드', tripod: '삼각대 스탠드', mlamp: '버섯 램프', tlamp: '테이블 램프',
   uplight: '업라이트 스탠드', plant: '식물·화분', vase: '꽃병·오브제', basket: '바구니', books: '책 더미', rug: '러그',
   rugR: '원형 러그', curtainI: '커튼', frame: '액자', mirrorR: '원형 거울', mirrorF: '전신 거울', clock: '벽시계',
-  screen: '접이식 파티션', catTower: '캣타워', petHouse: '펫 하우스',
+  screen: '접이식 파티션', catTower: '캣타워', petHouse: '펫 하우스', mshelf: '메탈 프레임 선반장', person: '사람',
 };
 
 export const PV = [
@@ -77,13 +77,35 @@ const ART = [0xd98b5f, 0x5f8fa8, 0xe9c46a, 0x2a9d8f, 0x264653, 0xe76f51, 0xf4a26
 
 function leaf(it, w) { if (it.fold && LEAF[it.type]) { const l = it.w - w; B(w / 2 - 1, it.h - 3 - l, 0, 2, l, it.d - 4); } }
 function frame(w, d, h, i, c) { B(0, h - 9, d / 2 - i, w - 2 * i, 6, 2, c); B(0, h - 9, -d / 2 + i, w - 2 * i, 6, 2, c); B(w / 2 - i, h - 9, 0, 2, 6, d - 2 * i, c); B(-w / 2 + i, h - 9, 0, 2, 6, d - 2 * i, c); }
+export const COLSTY = {
+  shelfW: [['O', '오픈'], ['P', '포인트 패널'], ['R', '하단 서랍'], ['D', '하단 도어']],
+  shelfM: [['O', '오픈'], ['R', '하단 서랍'], ['P', '포인트 패널'], ['D', '하단 도어']],
+  shelfC: [['O', '오픈'], ['P', '포인트 패널'], ['R', '하단 서랍'], ['D', '하단 도어']],
+  shelfS: [['A', '4칸 (기본)'], ['B', '3칸 (띄움)'], ['C', '5칸']],
+  bookcase: [['B', '책 진열'], ['O', '오픈 (빈칸)'], ['D', '하단 도어'], ['R', '하단 서랍'], ['G', '유리 도어']],
+  mshelf: [['O', '기본형 (오픈)'], ['R', '서랍형'], ['D', '도어형'], ['3', '3단 서랍'], ['C', '큐브 칸막이']],
+};
+export function colPat(it, len) {
+  if (it.cpat && it.cpat.length) return String(it.cpat);
+  const t = it.type;
+  if (t === 'shelfS') return 'ABA';
+  if (t === 'bookcase') return 'B'.repeat(Math.max(1, Math.round(len / 80)));
+  if (t === 'mshelf') return 'O'.repeat(Math.max(1, Math.round(len / 80)));
+  const cn = Math.max(1, Math.round(len / (t === 'shelfM' ? 80 : 60)));
+  let p = ''; for (let i = 0; i < cn; i++) p += t === 'shelfM' ? (i % 2 ? 'O' : 'R') : (i % 2 ? 'P' : 'O'); return p;
+}
 function SH(it, u0, v0, len, dep, sw, st) {
-  const h = it.h, n = it.n || 5, cn = Math.max(1, Math.round(len / (st === 'M' ? 80 : 60))), cw = len / cn;
+  const h = it.h, n = it.n || 5, pat = colPat(it, len), cn = pat.length, cw = len / cn;
   const b = (u, y, v, l, hh, t, c) => sw ? B(v, y, u, t, hh, l, c) : B(u, y, v, l, hh, t, c);
   for (let k = 0; k <= n; k++) b(u0, k * (h - 2) / n, v0, len, 2, dep);
   b(u0, 0, v0 - dep / 2 + 0.5, len, h, 1, 'd');
   for (let i = 0; i <= cn; i++) { const u = u0 - len / 2 + i * cw; if (st === 'M') [1, -1].forEach(s => b(u, 0, v0 + s * (dep / 2 - 1.5), 3, h, 3, K)); else b(u, 0, v0, 3, h, dep, K); }
-  for (let i = 0; i < cn; i++) { const u = u0 - len / 2 + (i + 0.5) * cw; if (st === 'M') { if (i % 2 == 0) b(u, 0, v0 + dep / 2 - 1, cw - 4, h * 0.3, 1.5, 'd'); } else if (i % 2) b(u, h * 0.36, v0 + dep / 2 - 1, cw - 4, h * 0.24, 1.5, K); }
+  for (let i = 0; i < cn; i++) {
+    const u = u0 - len / 2 + (i + 0.5) * cw, c = pat[i], sec = (h - 2) / n;
+    if (c === 'R') b(u, 0, v0 + dep / 2 - 1, cw - 4, Math.min(h * 0.3, sec * 1.4), 1.5, 'd');
+    else if (c === 'P') b(u, h * 0.36, v0 + dep / 2 - 1, cw - 4, h * 0.24, 1.5, K);
+    else if (c === 'D') { [-1, 1].forEach(s => b(u + s * cw / 4, 2, v0 + dep / 2 - 1, cw / 2 - 2.5, sec * 2 - 2, 1.5, 'f')); }
+  }
 }
 function legsC(w, d, h, ins, r, c) { Q4.forEach(([a, b]) => C(a * (w / 2 - ins), 0, b * (d / 2 - ins), r, r * 0.8, h, c)); }
 function keyboard(y, z, len, dep) {
@@ -273,25 +295,52 @@ const BUILD = {
     for (let k = 0; k < n; k++) { const y = 7 + k * (h - 10) / n, sh = (h - 10) / n; for (let j = 0; j < 3; j++) { const rad = 2 + r() * 4, hh = sh * (0.3 + r() * 0.5); C(-w / 2 + (j + 0.5) * (w / 3), y, (r() - 0.5) * (d - 14), rad, rad * 0.8, hh, ART[(r() * ART.length) | 0]); } }
   },
   bookcase: (it, w) => {
-    const { d, h } = it, n = it.n || 5, t = 2, sh = (h - t) / n, r = rng(it.id || 1);
+    const { d, h } = it, n = it.n || 5, t = 2, sh = (h - t) / n, r = rng(it.id || 1), pat = colPat(it, w), cn = pat.length, cw = (w - t) / cn;
     B(-w / 2 + t / 2, 0, 0, t, h, d); B(w / 2 - t / 2, 0, 0, t, h, d); B(0, 0, -d / 2 + 0.5, w, h, 1, 'd');
     for (let k = 0; k <= n; k++) B(0, k * sh, 0, w - 2 * t, t, d);
+    for (let i = 1; i < cn; i++) B(-w / 2 + t / 2 + i * cw, 0, 0, t, h, d);
     const bd = Math.min(d - 4, 22);
-    for (let k = 0; k < n; k++) {
-      let x = -w / 2 + t + 1; const y = k * sh + t, end = w / 2 - t - 1;
-      while (x < end - 3) {
-        const bw = 2 + r() * 3.5, bh = Math.min(sh - 3, sh * (0.55 + r() * 0.35));
-        if (r() < 0.14) { x += 6 + r() * 8; continue; }
-        if (x + bw > end) break;
-        B(x + bw / 2, y, -d / 2 + 1 + bd / 2, bw, bh, bd, BOOK[(r() * BOOK.length) | 0]);
-        x += bw + 0.3;
+    for (let ci = 0; ci < cn; ci++) {
+      const c = pat[ci], x0 = -w / 2 + t + ci * cw, x1 = x0 + cw - t, xc = (x0 + x1) / 2;
+      const low = c === 'D' || c === 'R' ? Math.min(2, n) : 0;
+      if (c === 'D') [-1, 1].forEach(s => B(xc + s * (x1 - x0) / 4, 1, d / 2 - 0.5, (x1 - x0) / 2 - 0.6, low * sh - 1, 1, 'f'));
+      if (c === 'R') for (let k = 0; k < low; k++) { B(xc, k * sh + t + 0.3, d / 2 - 0.5, x1 - x0 - 0.6, sh - t - 0.6, 1, 'f'); B(xc, k * sh + sh * 0.6, d / 2 + 0.4, Math.min(12, cw * 0.3), 1.2, 1.2, CH); }
+      if (c === 'G') B(xc, t, d / 2 - 0.5, x1 - x0 - 0.6, h - 2 * t, 0.4, GL, { op: 0.25 });
+      for (let k = low; k < n; k++) {
+        let x = x0 + 1; const y = k * sh + t;
+        if (c === 'O') break;
+        while (x < x1 - 4) {
+          const bw = 2 + r() * 3.5, bh = Math.min(sh - 3, sh * (0.55 + r() * 0.35));
+          if (r() < 0.14) { x += 6 + r() * 8; continue; }
+          if (x + bw > x1 - 1) break;
+          B(x + bw / 2, y, -d / 2 + 1 + bd / 2, bw, bh, bd, BOOK[(r() * BOOK.length) | 0]);
+          x += bw + 0.3;
+        }
       }
     }
+  },
+  mshelf: (it, w) => {
+    const { d, h } = it, n = it.n || 5, pat = colPat(it, w), cn = pat.length, cw = w / cn, sec = (h - 6) / n, t = 2.4;
+    for (let i = 0; i <= cn; i++) { const x = -w / 2 + i * cw + (i === 0 ? 1.5 : i === cn ? -1.5 : 0); [1, -1].forEach(s => B(x, 0, s * (d / 2 - 1.5), 3, h, 3, K)); B(x, h - 3, 0, 3, 3, d, K); B(x, 2, 0, 3, 3, d, K); }
+    B(0, 3, -d / 2 + 0.6, w - 2, h - 6, 1, 0x2e3035);
+    for (let k = 0; k <= n; k++) B(0, 3 + k * sec - (k === n ? t : 0), 0, w - 3, t, d - 2);
+    [...pat].forEach((c, i) => {
+      const xc = -w / 2 + cw * (i + 0.5), iw = cw - 4;
+      if (c === 'R') { B(xc, 3 + t, d / 2 - 1, iw, sec - t - 0.5, 1.5, 'f'); B(xc, 3 + sec * 0.6, d / 2 + 0.3, Math.min(20, iw * 0.3), 1.2, 1.2, CH); }
+      if (c === 'D') { [-1, 1].forEach(s => { B(xc + s * iw / 4, 3 + t, d / 2 - 1, iw / 2 - 0.5, sec * 2 - t - 0.5, 1.5, 'f'); B(xc + s * 2, 3 + sec, d / 2 + 0.3, 1.2, 12, 1.2, CH); }); }
+      if (c === '3') { const hh = (sec * 2 - t) / 3; for (let j = 0; j < 3; j++) { B(xc, 3 + t + j * hh, d / 2 - 1, iw, hh - 0.6, 1.5, 'f'); B(xc, 3 + t + j * hh + hh * 0.55, d / 2 + 0.3, Math.min(18, iw * 0.3), 1.2, 1.2, CH); } }
+      if (c === 'C') { for (let k = 1; k < n; k += 2) { const off = (k % 4 === 1 ? -1 : 1) * iw * 0.25; B(xc + off, 3 + k * sec, 0, t, sec, d - 2); B(xc + off - (k % 4 === 1 ? -1 : 1) * iw * 0.12, 3 + k * sec, -d / 2 + 2, iw * 0.24, sec - t, 1, 'f'); } }
+    });
   },
   shelfW: (it, w) => SH(it, 0, 0, w, it.d, 0, 'W'),
   shelfM: (it, w) => SH(it, 0, 0, w, it.d, 0, 'M'),
   shelfC: (it, w) => { const d = it.d, t = Math.min(32, w / 2); SH(it, 0, -d / 2 + t / 2, w, t, 0, 'W'); SH(it, t / 2, -w / 2 + t / 2, d - t, t, 1, 'W'); },
-  shelfS: (it, w) => { const { d, h } = it, cw = w / 3, t = 2.5, cell = (x, y, dp, ch) => { B(x, y, 0, cw, t, dp); B(x, y + ch - t, 0, cw, t, dp); B(x - cw / 2 + t / 2, y, 0, t, ch, dp); B(x + cw / 2 - t / 2, y, 0, t, ch, dp); }; [[-cw, 4, 0, 1, d * 0.92], [0, 3, h * 0.06, 0.88, d], [cw, 4, 0, 1, d * 0.92]].forEach(([x, m, oy, f, dp]) => { const ch = h * f / m; for (let i = 0; i < m; i++) cell(x, oy + i * ch, dp, ch); }); },
+  shelfS: (it, w) => {
+    const { d, h } = it, pat = colPat(it, w), cw = w / pat.length, t = 2.5;
+    const cell = (x, y, dp, ch) => { B(x, y, 0, cw, t, dp); B(x, y + ch - t, 0, cw, t, dp); B(x - cw / 2 + t / 2, y, 0, t, ch, dp); B(x + cw / 2 - t / 2, y, 0, t, ch, dp); };
+    const ST = { A: [4, 0, 1, 0.92], B: [3, 0.06, 0.88, 1], C: [5, 0, 1, 1] };
+    [...pat].forEach((c, i) => { const [m, oy, f, df] = ST[c] || ST.A, x = -w / 2 + cw * (i + 0.5), ch = h * f / m; for (let k = 0; k < m; k++) cell(x, h * oy + k * ch, d * df, ch); });
+  },
   shelfR: (it, w) => { const { h } = it, r = Math.min(w, it.d) / 2, n = it.n || 4; for (let k = 0; k <= n; k++) C(0, k * (h - 3) / n, 0, r, r, 3); B(0, 0, 0, r * 1.7, h, 2.5, 'd'); B(0, 0, 0, 2.5, h, r * 1.7, 'd'); },
   rack: (it, w) => {
     const { d, h } = it, n = Math.max(2, it.n || 4);
@@ -410,6 +459,7 @@ const BUILD = {
   tlamp: (it, w) => { const { h } = it, m = Math.min(w, it.d); S(0, h * 0.22, 0, m * 0.28, null, { sy: 1.3, ws: 20, hs: 14 }); C(0, h * 0.42, 0, 1, 1, h * 0.14, GD); C(0, h * 0.55, 0, m * 0.36, m / 2, h * 0.45, 'a', { em: 1, seg: 28 }); Lt(0, h * 0.7, 0); },
   uplight: (it, w) => { const { h } = it, m = Math.min(w, it.d); C(0, 0, 0, m * 0.35, m * 0.4, 2.5, null); C(0, 2.5, 0, 1.1, 1.1, h - 14, null); C(0, h - 12, 0, m / 2, m * 0.1, 12, 'a', { em: 1, seg: 28 }); Lt(0, h - 2, 0); },
   plant: (it, w) => buildPlant(it, w),
+  person: (it, w) => buildPerson(it, w),
   vase: (it, w) => { const { h } = it, m = Math.min(w, it.d); S(0, h * 0.35, 0, m / 2, null, { sy: (h * 0.7) / m, ws: 20, hs: 14 }); C(0, h * 0.6, 0, m * 0.16, m * 0.22, h * 0.4, null, { seg: 16 }); },
   basket: (it, w) => { const { d, h } = it; C(0, 0, 0, w / 2, w / 2 * 0.86, h, null, { sz: d / w, seg: 24 }); C(0, h - 0.3, 0, w / 2 - 1.5, w / 2 - 1.5, 0.4, 'd', { sz: d / w, seg: 24 }); T(0, h, 0, w / 2, 0.8, 'd', { rx: PI / 2, sy: d / w }); },
   books: (it, w) => { const { d, h } = it, r = rng(it.id || 1); let y = 0; while (y < h - 1.5) { const bh = 2 + r() * 2.5; B((r() - 0.5) * 3, y, (r() - 0.5) * 2, w * (0.75 + r() * 0.25), Math.min(bh, h - y), d * (0.75 + r() * 0.25), y === 0 ? null : BOOK[(r() * BOOK.length) | 0], { ry: (r() - 0.5) * 0.3 }); y += bh; } },
@@ -460,6 +510,57 @@ const BUILD = {
     Disc(0, bh * 0.45, d / 2 + 0.1, Math.min(bh * 0.35, w * 0.28), 0.3, 0x2b2420);
   },
 };
+
+export const OUTFITS = [['suit', '정장'], ['casual', '캐주얼'], ['tshirt', '티셔츠·반바지'], ['dress', '원피스'], ['gown', '웨딩드레스'], ['hanbok', '한복 (치마)'], ['hanbokM', '한복 (바지)'], ['coat', '코트']];
+export const HAIRS = [['short', '짧은 머리'], ['long', '긴 머리'], ['bun', '올림머리'], ['bob', '단발'], ['bald', '민머리']];
+function buildPerson(it, w) {
+  const H = it.h, sex = it.sex || 'm', ch = sex === 'c', of = it.outfit || (sex === 'f' ? 'dress' : 'suit'), sit = it.pose === 'sit';
+  const SK = it.skin || '#e8c4a2', HR = it.hair || '#2a2220', SH = it.shoe || '#1d1d1f', TOP = null, BOT = 'a';
+  const hd = ch ? H / 6 : H / 7.6, hr = hd * 0.5, sw = (sex === 'm' ? 0.125 : 0.11) * H, hw = (sex === 'm' ? 0.085 : 0.095) * H;
+  const hip0 = H * 0.52, dy = sit ? (H * 0.27 - hip0) : 0, hipY = hip0 + dy, shY = H * 0.815 + dy, topY = H + dy;
+  const lr = H * 0.034, lx = hw * 0.55, skirt = of === 'dress' || of === 'gown' || of === 'hanbok';
+  // 다리·신발
+  if (sit) {
+    [-1, 1].forEach(s => { Stick(s * lx, hipY, 0, s * lx, hipY, H * 0.24, lr, lr * 0.9, skirt ? SK : BOT); Stick(s * lx, hipY, H * 0.24, s * lx, H * 0.05, H * 0.25, lr * 0.85, lr * 0.7, of === 'tshirt' || of === 'dress' ? SK : BOT); B(s * lx, 0, H * 0.28, H * 0.045, H * 0.045, H * 0.11, SH); });
+  } else if (of !== 'gown' && of !== 'hanbok') {
+    [-1, 1].forEach(s => {
+      const pants = of === 'dress' ? SK : BOT, knee = H * 0.28;
+      Stick(s * lx, H * 0.045, 0, s * lx, knee, 0, lr * 0.75, lr * 0.85, of === 'tshirt' || of === 'dress' ? SK : pants);
+      Stick(s * lx, knee, 0, s * lx * 1.05, hipY, 0, lr * 0.85, lr, of === 'dress' ? SK : pants);
+      B(s * lx, 0, H * 0.02, H * 0.045, H * 0.045, H * 0.11, SH);
+    });
+    if (of === 'tshirt') [-1, 1].forEach(s => Stick(s * lx, H * 0.34, 0, s * lx * 1.05, hipY, 0, lr * 1.12, lr * 1.18, BOT));
+  }
+  // 하의(치마)
+  if (of === 'gown') C(0, 0, sit ? H * 0.1 : 0, hw * 1.05, sit ? H * 0.24 : H * 0.31, hipY + H * 0.08, TOP, { seg: 32 });
+  if (of === 'hanbok') C(0, 0, 0, sw * 0.85, H * 0.24, shY - H * 0.07, BOT, { seg: 28 });
+  if (of === 'dress') C(0, sit ? hipY - 2 : H * 0.27, sit ? H * 0.08 : 0, hw * 1.05, hw * 1.75, sit ? H * 0.06 : hipY - H * 0.27 + H * 0.04, TOP, { seg: 24 });
+  if (of === 'coat' && !sit) C(0, H * 0.3, 0, hw * 1.1, hw * 1.45, hipY - H * 0.3 + 2, TOP, { seg: 20 });
+  // 상체
+  C(0, hipY, 0, sw * 0.95, hw * 1.05, shY - hipY, of === 'hanbok' ? null : TOP, { sz: 0.55, seg: 20 });
+  if (of === 'hanbok') C(0, shY - H * 0.1, 0, sw * 0.98, sw * 0.9, H * 0.1, TOP, { sz: 0.58, seg: 20 });
+  if (of === 'suit' || of === 'coat') { B(0, shY - H * 0.17, sw * 0.55 * 0.92, sw * 0.42, H * 0.16, 0.6, 0xf7f7f5); B(0, shY - H * 0.17, sw * 0.55 * 0.92 + 0.4, H * 0.016, H * 0.15, 0.4, it.tie || 0x1d1d1f); }
+  if (of === 'gown') C(0, shY - H * 0.04, 0, sw * 0.7, sw * 0.9, H * 0.04, SK, { sz: 0.5, seg: 16 });
+  // 팔
+  const bare = of === 'gown' || of === 'tshirt' || (of === 'dress' && !it.sleeve);
+  [-1, 1].forEach(s => {
+    const ax = s * (sw + H * 0.012), hy = sit ? hipY + H * 0.07 : hipY - H * 0.03, hz = sit ? H * 0.12 : H * 0.02, hx = s * (sw + (sit ? 0 : H * 0.025));
+    Stick(ax, shY - H * 0.02, 0, (ax + hx) / 2, (shY + hy) / 2, hz / 2, H * 0.03, H * 0.027, bare ? SK : TOP);
+    Stick((ax + hx) / 2, (shY + hy) / 2, hz / 2, hx, hy, hz, H * 0.027, H * 0.024, bare || of === 'tshirt' ? SK : TOP);
+    S(hx, hy - H * 0.02, hz, H * 0.024, SK, { sy: 1.4 });
+  });
+  // 목·머리·머리카락
+  C(0, shY - 1, 0, H * 0.026, H * 0.028, H * 0.04, SK, { seg: 12 });
+  const hy = topY - hr * 1.1;
+  S(0, hy, 0, hr * 0.92, SK, { sy: 1.15, ws: 20, hs: 14 });
+  const hs = it.hs || (sex === 'f' ? 'long' : 'short');
+  if (hs !== 'bald') S(0, hy + hr * 0.12, -hr * 0.08, hr * 0.98, HR, { sy: 1.1, tl: Math.PI * 0.55, ws: 20, hs: 10 });
+  if (hs === 'long') B(0, shY - H * 0.06, -hr * 0.55, hr * 1.7, hy - shY + H * 0.06, hr * 0.7, HR);
+  if (hs === 'bob') B(0, hy - hr * 0.9, -hr * 0.3, hr * 2, hr * 1.1, hr * 1.2, HR);
+  if (hs === 'bun') S(0, hy + hr * 0.6, -hr * 0.75, hr * 0.45, HR);
+  if (it.veil) C(0, sit ? hipY : H * 0.2, -hr * 1.4, hr * 0.6, H * 0.2, hy - (sit ? hipY : H * 0.2), 0xffffff, { op: 0.35, seg: 20 });
+  void w; void ch;
+}
 
 function buildPlant(it, w) {
   const { d, h } = it, m = Math.min(w, d), fr = m / 2, v = it.pv || 'leafy', r = rng((it.id || 1) * 7 + 3);

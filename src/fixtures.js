@@ -1,6 +1,7 @@
 // 창문·문(창호)과 천장/벽 조명 3D 모델
 // 창호 로컬 좌표: x = 벽을 따라(방 안에서 벽을 볼 때 오른쪽이 +), y = 바닥에서 높이, z = 방 안쪽(+)
 import * as THREE from 'three';
+import { viewTexture } from './materials.js';
 const PI = Math.PI;
 
 export const WIN_ST = [['slide', '미서기창 (2짝)'], ['slide4', '미서기창 (4짝)'], ['casement', '여닫이창'], ['tilt', '시스템창 (턴앤틸트)'], ['fixed', '고정창 (픽스)'], ['grid', '격자창'], ['full', '통창']];
@@ -59,28 +60,26 @@ function buildWin(o, R, g) {
   BX(g, w + 2 * ft, ft, 10, 0, y0 - ft, -3, fc); BX(g, w + 2 * ft, ft, 10, 0, y0 + h, -3, fc);
   BX(g, ft, h, 10, -w / 2 - ft / 2, y0, -3, fc); BX(g, ft, h, 10, w / 2 + ft / 2, y0, -3, fc);
   if (st !== 'full' && y0 > 8) BX(g, w + 16, 2, 10, 0, y0 - 2, 5, 0xf6f4ef);
-  const sash = (x, sw, z, hd) => {
+  const wo = Math.max(0, Math.min(1, o.wo || 0));
+  const sash = (x, sw, z, hd, par = g) => {
     const t = 4;
-    BX(g, sw, t, 3, x, y0, z, fc); BX(g, sw, t, 3, x, y0 + h - t, z, fc);
-    BX(g, t, h - 2 * t, 3, x - sw / 2 + t / 2, y0 + t, z, fc); BX(g, t, h - 2 * t, 3, x + sw / 2 - t / 2, y0 + t, z, fc);
-    GLS(g, sw - 2 * t, h - 2 * t, x, y0 + t, z);
-    if (hd) BX(g, 1.5, 10, 2, x + hd * (sw / 2 - 2), y0 + h / 2 - 5, z + 2.5, CH);
+    BX(par, sw, t, 3, x, y0, z, fc); BX(par, sw, t, 3, x, y0 + h - t, z, fc);
+    BX(par, t, h - 2 * t, 3, x - sw / 2 + t / 2, y0 + t, z, fc); BX(par, t, h - 2 * t, 3, x + sw / 2 - t / 2, y0 + t, z, fc);
+    GLS(par, sw - 2 * t, h - 2 * t, x, y0 + t, z);
+    if (hd) BX(par, 1.5, 10, 2, x + hd * (sw / 2 - 2), y0 + h / 2 - 5, z + 2.5, CH);
   };
-  if (st === 'slide') { const sw = w / 2 + 3; sash(-w / 2 + sw / 2, sw, -4, 1); sash(w / 2 - sw / 2, sw, 0, -1); }
-  else if (st === 'slide4') { const sw = w / 4 + 3; for (let i = 0; i < 4; i++) sash(-w / 2 + sw / 2 + i * (w - sw) / 3, sw, i % 2 ? 0 : -4, i < 2 ? 1 : -1); }
-  else if (st === 'casement') { sash(-w / 4, w / 2, -2, 1); sash(w / 4, w / 2, -2, -1); }
-  else if (st === 'tilt') sash(0, w, -2, -1);
-  else if (st === 'fixed') GLS(g, w, h, 0, y0, -3);
-  else if (st === 'grid') {
-    GLS(g, w, h, 0, y0, -3);
-    const cols = Math.max(2, Math.round(w / 45)), rows = Math.max(2, Math.round(h / 45));
-    for (let i = 1; i < cols; i++) BX(g, 2, h, 2, -w / 2 + i * w / cols, y0, -2, fc);
-    for (let j = 1; j < rows; j++) BX(g, w, 2, 2, 0, y0 + j * h / rows - 1, -2, fc);
-  } else if (st === 'full') {
-    GLS(g, w, h, 0, y0, -3);
-    const n = Math.max(1, Math.round(w / 120));
-    for (let i = 1; i < n; i++) BX(g, 4, h, 6, -w / 2 + i * w / n, y0, -3, fc);
-    if (h > 180) BX(g, w, 4, 6, 0, y0 + h - 40, -3, fc);
+  const leafW = (px, lw, dir, ang) => { const p = new THREE.Group(); p.position.set(px, 0, 0); p.rotation.y = -dir * ang; g.add(p); sash(dir * lw / 2, lw, 0, -dir, p); };
+  if (st === 'slide') { const sw = w / 2 + 3; sash(-w / 2 + sw / 2, sw, -4, 1); sash(w / 2 - sw / 2 - wo * (w - sw), sw, 0, -1); }
+  else if (st === 'slide4') { const sw = w / 4 + 3, step = (w - sw) / 3; for (let i = 0; i < 4; i++) { let x = -w / 2 + sw / 2 + i * step; if (i === 1) x -= wo * step; if (i === 2) x += wo * step; sash(x, sw, i % 2 ? 0 : -4, i < 2 ? 1 : -1); } }
+  else if (st === 'casement') { leafW(-w / 2, w / 2, 1, wo * PI / 2); leafW(w / 2, w / 2, -1, wo * PI / 2); }
+  else if (st === 'tilt') leafW(-w / 2, w, 1, wo * PI / 2);
+  const vw = o.view && o.view !== 'inherit' ? o.view : (R.view || 'city');
+  if (vw !== 'none') {
+    const tex = viewTexture(vw, R.vtimeNow || 'day').clone(); tex.needsUpdate = true;
+    const pw = w + 8, ph = h + 8, cx0 = ((o.id || 1) * 0.137) % 0.45;
+    tex.repeat.set(Math.min(1, pw / 700), Math.min(1, ph / 350)); tex.offset.set(cx0, Math.max(0, Math.min(1 - ph / 350, 0.62 - (y0 + h / 2) / 700)));
+    const bm = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), new THREE.MeshBasicMaterial({ map: tex }));
+    bm.position.set(0, y0 + h / 2, -9); bm.userData.scenery = 1; g.add(bm);
   }
   const cur = o.cur || 'none', cc = o.cc || '#e9e1d3', top = Math.min(R.H - 3, y0 + h + 18);
   if (cur === 'curtain' || cur === 'sheer') {
@@ -138,12 +137,12 @@ function buildDoor(o, R, g) {
     if (o.glass) GLS(p, w * 0.45, h * 0.55, 0, h * 0.3, 2.2, 0.5);
     BX(p, 2, 30, 3, dir * (w / 2 - 5), h * 0.4, 2.5, CH);
   } else if (st === 'jung3') {
-    const ov = 4, pw = (w + 2 * ov) / 3, t = 2.5, zs = [4, 9, 14];
+    const ov = 4, pw = (w + 2 * ov) / 3, t = 2.5, zs = [4, 9, 14], oc = o.open ?? (angD / 90) * 2, m = hl ? 1 : -1;
     BX(g, w, 5, 16, 0, h - 5, 9, fc); BX(g, w, 1.5, 16, 0, 0, 9, fc);
-    const ox = hl ? -w / 2 + pw / 2 : w / 2 - pw / 2;
+    const X = i => -w / 2 + pw / 2 + i * (pw - ov); // 쌓이는 쪽(경첩 쪽)부터 0,1,2
+    const pos = [X(0), X(1) + (X(0) - X(1)) * Math.max(0, Math.min(1, oc - 1)), X(2) + (X(1) - X(2)) * Math.min(1, Math.max(0, oc)) + (X(0) - X(1)) * Math.max(0, Math.min(1, oc - 1))];
     for (let i = 0; i < 3; i++) {
-      let cx = -w / 2 + pw / 2 + i * (pw - ov); cx += (ox - cx) * f;
-      const p = new THREE.Group(); p.position.set(cx, 0, zs[i]); g.add(p);
+      const p = new THREE.Group(); p.position.set(m * pos[i], 0, zs[i]); g.add(p);
       BX(p, 5, h - 8, t, -pw / 2 + 2.5, 1.5, 0, fc); BX(p, 5, h - 8, t, pw / 2 - 2.5, 1.5, 0, fc); BX(p, pw, 5, t, 0, h - 10, 0, fc); BX(p, pw, 6, t, 0, 1.5, 0, fc);
       BX(p, pw - 8, 30, t, 0, 7.5, 0, 0x3a3d42); GLS(p, pw - 9, Math.max(1, h - 52), 0, 40, 0);
     }

@@ -89,6 +89,11 @@ export const CAT = [
     ['루프 회전책장 4단', 45, 45, 130, '#1d1d1f', 'shelfR', { n: 4 }],
     ['오픈 책장 (책 포함)', 80, 30, 180, '#efe9df', 'bookcase', { n: 5 }],
     ['사다리 선반', 60, 40, 180, '#c49a6c', 'ladder', { n: 5 }],
+    ['메탈 5단 800 기본형', 80, 35, 199, '#a0714f', 'mshelf', { n: 5, cpat: 'O' }],
+    ['메탈 5단 800 서랍형', 80, 35, 199, '#a0714f', 'mshelf', { n: 5, cpat: 'R' }],
+    ['메탈 5단 800 도어형', 80, 35, 199, '#a0714f', 'mshelf', { n: 5, cpat: 'D' }],
+    ['메탈 5단 1200 기본형', 115, 35, 199, '#a0714f', 'mshelf', { n: 5, cpat: 'CC' }],
+    ['메탈 5단 1200 도어·서랍형', 115, 35, 199, '#a0714f', 'mshelf', { n: 5, cpat: 'D3' }],
   ]],
   ['수납', [
     ['수납장 2도어', 80, 40, 90, '#f1efe9', 'cab', { n: 2, lg: 8 }],
@@ -171,5 +176,15 @@ export const CAT = [
     ['디지털 피아노', 135, 40, 80, '#2b2b2d', 'dpiano'],
     ['안마의자', 80, 130, 120, '#5b4636', 'massage'],
     ['러닝머신', 75, 170, 130, '#2b2b2d', 'treadmill'],
+  ]],
+  ['사람', [
+    ['남성 (정장) 180', 58, 32, 180, '#3a3d42', 'person', { sex: 'm', outfit: 'suit', c2: '#3a3d42', hs: 'short', nc: 1 }],
+    ['남성 (캐주얼) 180', 56, 30, 180, '#5f8fa8', 'person', { sex: 'm', outfit: 'casual', c2: '#2f3b52', hs: 'short', nc: 1 }],
+    ['여성 (원피스) 165', 50, 32, 165, '#c96f6f', 'person', { sex: 'f', outfit: 'dress', c2: '#c96f6f', hs: 'long', nc: 1 }],
+    ['여성 (캐주얼) 165', 48, 28, 165, '#e9e1d3', 'person', { sex: 'f', outfit: 'casual', c2: '#3b4a66', hs: 'bob', nc: 1 }],
+    ['신부 (웨딩드레스) 165', 102, 102, 165, '#f8f6f2', 'person', { sex: 'f', outfit: 'gown', hs: 'bun', veil: 1, nc: 1 }],
+    ['한복 여성 165', 80, 80, 165, '#eef0f2', 'person', { sex: 'f', outfit: 'hanbok', c2: '#e6e2f0', hs: 'bun', nc: 1 }],
+    ['어린이 120', 38, 24, 120, '#f2c14e', 'person', { sex: 'c', outfit: 'tshirt', c2: '#5f8fa8', hs: 'short', nc: 1 }],
+    ['앉은 남성 180', 58, 72, 180, '#7a8a9a', 'person', { sex: 'm', outfit: 'casual', c2: '#2f3b52', pose: 'sit', nc: 1 }],
   ]],
 ];
