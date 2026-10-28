@@ -348,3 +348,31 @@ body.mob .rsz span{width:64px;height:6px}
 .lbx-hint{position:absolute;bottom:calc(12px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);color:#fff;font-size:12px;opacity:.6;background:rgba(0,0,0,.35);padding:4px 10px;border-radius:999px;pointer-events:none;animation:lbxh 3s forwards}
 @keyframes lbxh{0%,70%{opacity:.6}100%{opacity:0}}
 .refg img,.sv-img img{cursor:zoom-in}
+/* 렌더 창 — 붙여 둔 참고 사진 목록 · 잘라내기 */
+.arw{border:1px solid var(--bd);border-radius:10px;padding:6px 10px;margin:6px 0;background:var(--bg)}
+.arw summary{cursor:pointer;font-size:13px;font-weight:600;padding:2px 0}
+.arl{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.arb{border-top:1px solid var(--bd);padding-top:6px}
+.arh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px}.arh .ck{flex:1;min-width:0}
+.arg{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.arc{flex:none;width:96px;display:flex;flex-direction:column;gap:3px;font-size:11px}
+.arc img{width:96px;height:96px;object-fit:cover;border-radius:7px;background:var(--ch);cursor:zoom-in;display:block}
+.arc select{font-size:11px;padding:2px 3px}.arc .ck{font-size:11px}
+.arc.off img{opacity:.35;filter:grayscale(1)}.refc.off .refi{opacity:.4;filter:grayscale(1)}
+.xri{position:relative;flex:none}.xri img{cursor:zoom-in}
+.xrc{position:absolute;left:3px;bottom:3px;background:rgba(20,120,60,.9);color:#fff;font-size:10px;padding:1px 5px;border-radius:5px}
+.crw{position:relative;display:inline-block;max-width:100%;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair;margin:6px 0}
+.crw img{display:block;max-width:100%;max-height:62vh;pointer-events:none}
+.crr{position:absolute;border:2px solid #2f6fed;background:rgba(47,111,237,.15);box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none}
+.crw{overflow:hidden}
+.okc{color:#1f7a3f}
+.sentg{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}.sentg figure{margin:0;width:110px}.sentg img{width:110px;height:80px;object-fit:cover;border-radius:6px;cursor:zoom-in;display:block}.sentg figcaption{font-size:11px;text-align:center}
+/* 모바일 키보드가 열렸을 때: 시트·창을 키보드 위로 */
+body.mob.kb #p{bottom:var(--kb,0px);height:clamp(200px,var(--sh),calc(var(--vvh,60vh) - 70px));transition:none;padding-bottom:0}
+body.mob.kb #fab,body.mob.kb #qb{display:none}
+body.mob.kb .mdl,body.mob.kb #savem{top:var(--vvt,0px);bottom:auto;height:var(--vvh,100%);align-items:flex-end}
+body.mob.kb .mdl-box{max-height:calc(var(--vvh,100vh) - 16px)}
+#kbv{display:none}
+body.mob.kb #kbv{display:flex;position:fixed;left:8px;right:8px;top:calc(var(--vvt,0px) + 6px);z-index:190;align-items:baseline;gap:8px;background:rgba(20,22,28,.92);color:#fff;border-radius:12px;padding:8px 12px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none}
+#kbv small{opacity:.7;font-size:12px;flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#kbv b{font-size:20px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+body.mob.kb .mdl ~ #kbv,body.mob.kb.kbm #kbv{display:none}

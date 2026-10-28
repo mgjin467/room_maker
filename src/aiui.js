@@ -361,7 +361,13 @@ JSON 하나만:
   }
   const OUTFIT_EN = { suit: 'a business suit', suit3: 'a three-piece suit', tux: 'a tuxedo', casual: 'a shirt and trousers', tshirt: 'a t-shirt and shorts', hoodie: 'a hoodie and trousers', knit: 'a knit sweater and trousers', sport: 'a tracksuit', coat: 'a long coat', blouse: 'a blouse and skirt', dress: 'a dress', longdress: 'a long dress', gown: 'a white wedding gown', mermaid: 'a long fitted evening gown', hanbok: 'a traditional Korean hanbok', hanbokM: 'a traditional Korean hanbok', beachM: 'a Hawaiian shirt and shorts', tank: 'a casual top and shorts', rash: 'a long-sleeve rash guard and board shorts', swimF: 'a one-piece swimsuit with a beach cover-up', apron: 'work clothes with an apron', blazer: 'a blazer and slacks', jeans: 'a t-shirt and jeans' };
   const BUILD_EN = { slim: 'slim build', muscle: 'athletic build', curvy: 'medium build', plump: 'sturdy build', petite: 'petite build' };
-  const personEN = (i, plain) => `a ${i.sex === 'f' ? 'woman' : i.sex === 'c' ? 'child' : 'man'} about ${i.h}cm tall wearing ${OUTFIT_EN[i.outfit] || 'everyday clothes'} (clothing colors ${[i.color, i.c2].filter(Boolean).join(' and ')}, with shoes)${!plain && BUILD_EN[i.body] ? ', ' + BUILD_EN[i.body] : ''}${(POSE_EN[i.pose] ? ', ' + POSE_EN[i.pose] : '')}`;
+  let REFCTX = null; // 렌더 중: 객체 id → [{n: 참고 이미지 번호, kind}]
+  const sexEN = i => i.sex === 'f' ? 'woman' : i.sex === 'c' ? 'child' : 'man';
+  const personEN = (i, plain) => {
+    const rf = (!plain && REFCTX && REFCTX.get(i.id)) || [], nOf = ks => rf.filter(r => ks.includes(r.kind)).map(r => '#' + r.n), cl = nOf(['outfit', 'look']), fc = nOf(['face', 'facehair', 'look', 'hair']);
+    const wear = cl.length ? `wearing EXACTLY the outfit from reference image ${cl.join('/')} (ignore the 3D clothing colors)` : `wearing ${OUTFIT_EN[i.outfit] || 'everyday clothes'} (clothing colors ${[i.color, i.c2].filter(Boolean).join(' and ')}, with shoes)`;
+    return `a ${sexEN(i)} about ${i.h}cm tall ${wear}${fc.length ? `, with exactly the face and hairstyle of the person in reference image ${fc.join('/')}` : ''}${!plain && BUILD_EN[i.body] ? ', ' + BUILD_EN[i.body] : ''}${(POSE_EN[i.pose] ? ', ' + POSE_EN[i.pose] : '')}`;
+  };
   const POSE_EN = { sit: 'seated', sitW: 'seated, waving', walk: 'walking', wave: 'waving', cross: 'arms crossed', hips: 'hands on hips', point: 'pointing', cheer: 'arms raised', hold: 'hands together' };
   function renderPrompt(viewKey, o) {
     const out = (A.describe().space || {}).kind === 'outdoor';
@@ -377,20 +383,112 @@ ${sceneText(viewKey)}`;
     for (let k = 0; k < 8; k++) { const c = document.createElement('canvas'), m = Math.min(1, 1920 / Math.max(img.width, img.height)) * s; c.width = Math.round(img.width * m); c.height = Math.round(img.height * m); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); out = c.toDataURL('image/jpeg', q); if (out.length < 900000) break; q -= 0.1; if (q < 0.5) { s *= 0.8; q = 0.8; } }
     return { img: out, t: Date.now(), ...meta };
   }
+  // ---------- 참고 사진: 객체별 목록 · 보낼 사진 계획 · 대상 잘라내기 ----------
+  const MAXI = 10; // 한 번에 AI에 보내는 이미지 상한 (3D 화면·구조 가이드 포함)
+  const PER_OBJ = 3; // 객체 하나당 보내는 붙여 둔 사진 수
+  const refOwners = () => { const L = []; for (const it of A.items.filter(x => x.type === 'person')) if ((it.refs || []).length) L.push({ o: it, refs: it.refs }); for (const it of A.items.filter(x => x.type !== 'person')) if ((it.refs || []).length) L.push({ o: it, refs: it.refs }); if ((A.R.refs || []).length) L.push({ o: 'space', refs: A.R.refs }); return L; };
+  // 사람 → 가구·소품 → 공간 순서로, 객체당 PER_OBJ장 · 전체 max장까지
+  // 이번 렌더용 사진이 같은 사람의 같은 항목을 지정했으면, 붙여 둔 사진(다른 얼굴·옷일 수 있음)은 빼서 충돌 방지
+  const OVER = { look: ['face', 'hair', 'outfit', 'look'], facehair: ['face', 'hair', 'look'], face: ['face', 'look'], outfit: ['outfit', 'look'] };
+  const skipBy = xs => (it, r) => it !== 'space' && it.type === 'person' && xs.some(x => x.tgt === it && (OVER[x.aspect] || []).includes(r.kind));
+  function planRefs(max, skip) {
+    let left = max; const out = [];
+    for (const g of refOwners()) { let k = 0; const off = g.o !== 'space' && g.o.refUse === 0;
+      for (const r of g.refs) { let send = false, why = '';
+        if (off) why = '객체 꺼짐'; else if (r.use === 0) why = '끔'; else if (skip && skip(g.o, r)) why = '이번 렌더용 사진이 대신함'; else if (['pose', 'dims', 'layout'].includes(r.kind)) why = '자세·치수는 3D 값 사용'; else if (g.o !== 'space' && k >= PER_OBJ) why = `객체당 ${PER_OBJ}장까지`; else if (left <= 0) why = '전체 한도 초과'; else { send = true; k++; left--; }
+        out.push({ o: g.o, r, send, why }); } }
+    return out;
+  }
+  const loadImgEl = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('이미지를 읽지 못했습니다')); i.src = src; });
+  // box: [ymin,xmin,ymax,xmax] 0~1000
+  async function cropBox(src, box, pad = 0.05) {
+    const im = await loadImgEl(src), W = im.naturalWidth, H = im.naturalHeight;
+    let [y0, x0, y1, x1] = box.map(v => Math.max(0, Math.min(1000, +v)) / 1000); if (y1 < y0) [y0, y1] = [y1, y0]; if (x1 < x0) [x0, x1] = [x1, x0];
+    const pw = (x1 - x0) * pad, ph = (y1 - y0) * pad; x0 = Math.max(0, x0 - pw); x1 = Math.min(1, x1 + pw); y0 = Math.max(0, y0 - ph); y1 = Math.min(1, y1 + ph);
+    const sw = Math.max(8, (x1 - x0) * W), sh = Math.max(8, (y1 - y0) * H), k = Math.min(1, 1400 / Math.max(sw, sh)), c = document.createElement('canvas');
+    c.width = Math.round(sw * k); c.height = Math.round(sh * k); c.getContext('2d').drawImage(im, x0 * W, y0 * H, sw, sh, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.92);
+  }
+  async function findBox(src, note, isP) {
+    const v = modelFor('vision'); if (!v.key) throw new Error('사진 분석용 AI 키가 없습니다 (⚙ AI 설정)');
+    const j = parseJSON(await aiText({ ...v, json: true, images: [src],
+      system: `You locate ONE subject in a photo for cropping. Reply with JSON only: {"box":[ymin,xmin,ymax,xmax]} using integers 0-1000 relative to the image, or {"box":null} if not found. ${isP ? 'The subject is a person: the box must include the whole visible person from the top of the hair down to the lowest visible part (feet if visible), with all of their clothing, and as little of other people as possible. Do not identify who the person is.' : 'The subject is an object or piece of furniture: the box must include the whole object.'} Count positions from the viewer's left when the description says left/right or gives an order.`,
+      prompt: `찾을 대상: ${note}` }));
+    if (!j || !Array.isArray(j.box) || j.box.length !== 4) throw new Error(`사진에서 「${note}」을(를) 찾지 못했습니다 — 「✂ 대상만 잘라내기」로 직접 지정해 주세요`);
+    return j.box;
+  }
+  async function findInPhoto(src, note, isP) { return cropBox(src, await findBox(src, note, isP), 0.04); }
+  // 직접 드래그해서 잘라내기
+  function cropDialog(src, done, note, isP) {
+    const img = h('img', { src, draggable: 'false' }), rect = h('div', { class: 'crr', hidden: true }), wrap = h('div', { class: 'crw' }, img, rect);
+    let box = null, st0 = null; // box: 0~1 [x0,y0,x1,y1]
+    const show = () => { if (!box) { rect.hidden = true; return; } rect.hidden = false; const [a, b, c, d] = box; Object.assign(rect.style, { left: a * 100 + '%', top: b * 100 + '%', width: (c - a) * 100 + '%', height: (d - b) * 100 + '%' }); okB.disabled = false; };
+    const pt = e => { const r = img.getBoundingClientRect(); return [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))]; };
+    wrap.addEventListener('pointerdown', e => { e.preventDefault(); wrap.setPointerCapture(e.pointerId); st0 = pt(e); box = [...st0, ...st0]; show(); });
+    wrap.addEventListener('pointermove', e => { if (!st0) return; const p2 = pt(e); box = [Math.min(st0[0], p2[0]), Math.min(st0[1], p2[1]), Math.max(st0[0], p2[0]), Math.max(st0[1], p2[1])]; show(); });
+    wrap.addEventListener('pointerup', () => { st0 = null; if (box && (box[2] - box[0] < 0.02 || box[3] - box[1] < 0.02)) { box = null; show(); okB.disabled = true; } });
+    const okB = BTN('✂ 이 영역만 보내기', async () => { if (!box) return; done(await cropBox(src, [box[1] * 1000, box[0] * 1000, box[3] * 1000, box[2] * 1000], 0)); m.close(); }, 'b'); okB.disabled = true;
+    const aiB = note ? BTN(`🤖 「${note}」 자동 찾기`, async () => { aiB.disabled = true; aiB.textContent = '찾는 중…'; try { const b = await findBox(src, note, isP); const n = b.map(v => Math.max(0, Math.min(1000, +v)) / 1000); box = [Math.min(n[1], n[3]), Math.min(n[0], n[2]), Math.max(n[1], n[3]), Math.max(n[0], n[2])]; show(); toast('찾은 영역을 표시했습니다 — 맞으면 「이 영역만 보내기」, 아니면 직접 드래그하세요', 5000); } catch (e) { toast('⚠ ' + e.message, 6000); } aiB.disabled = false; aiB.textContent = `🤖 「${note}」 다시 찾기`; }, 'c') : null;
+    const m = modal('✂ 참고 사진에서 대상만 잘라내기', h('div', {}, h('p', { class: 'mu sm' }, isP ? '적용할 사람을 머리부터 발끝(보이는 곳까지)까지 드래그로 감싸세요. 다른 사람이 적게 들어갈수록 얼굴·옷이 정확하게 반영됩니다.' : '적용할 물건을 드래그로 감싸세요.'), wrap, h('div', { class: 'r' }, okB, aiB, BTN('취소', () => m.close(), 'c'))), { wide: true });
+  }
   function openRender(pre = {}) {
     const R = A.R, nCorner = Math.min(6, R.pts.length);
     const VIEWS = [['cur', '현재 화면'], ['door', '입구 시점'], ['iso', '대각선 (오른쪽)'], ['isoL', '대각선 (왼쪽)'], ['top', '위에서'], ...Array.from({ length: nCorner }, (_, i) => [`eye${i}`, `눈높이 · 모서리 ${i + 1}`]), ['sel', '선택 대상 클로즈업']];
     const st = { size: pre.size || 'yt', cw: 1920, ch: 1080, views: new Set(pre.views || ['cur']), style: pre.style || 'real', extra: pre.extra || '', decor: false, ai: true, quality: 'high', useRefs: true, extraRefs: [], guide: true, faces: true, noPeople: false };
-    const nRefs = () => (A.R.refs || []).length + A.items.reduce((n, i) => n + (i.refUse === 0 ? 0 : (i.refs || []).length), 0);
-    const xfi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }); xfi.onchange = async () => { const ppl = A.items.filter(x => x.type === 'person'); for (const f of xfi.files) st.extraRefs.push({ src: await fileToDataURL(f, 1200, 0.86), use: ppl.length === 1 ? 'p:' + ppl[0].id : 'style', aspect: 'face', note: '' }); xfi.value = ''; draw(); };
-    const ASPECTS = [['face', '얼굴'], ['facehair', '얼굴+헤어'], ['outfit', '옷차림'], ['look', '전체 모습 (얼굴·헤어·옷)']], ASP_EN = { face: 'FACE (facial features, skin tone)', facehair: 'FACE and HAIRSTYLE', outfit: 'CLOTHING (garments, fabric, colors)', look: 'FACE, HAIRSTYLE and CLOTHING' };
-    const xrRow = (x, i) => { const ppl = A.items.filter(q => q.type === 'person');
-      const us = h('select', {}, h('option', { value: 'style' }, '공간 분위기·스타일 참고'), ppl.map(q => h('option', { value: 'p:' + q.id }, `→ ${A.itemLabel(q)} ${q.name}`))); us.value = x.use; us.onchange = () => { x.use = us.value; draw(); };
-      const as = h('select', {}, ASPECTS.map(([k, n]) => h('option', { value: k }, n))); as.value = x.aspect; as.onchange = () => { x.aspect = as.value; };
-      const nt = h('input', { type: 'text', value: x.note, placeholder: '사진 속 어느 사람? 예: 왼쪽에서 3번째 서 있는 남자' }); nt.oninput = () => { x.note = nt.value; };
-      const tgt = x.use.startsWith('p:') ? A.items.find(q => 'p:' + q.id === x.use) : null;
-      return h('div', { class: 'xrr' }, h('img', { src: x.src }), h('div', { class: 'xrf' }, us, tgt ? as : null, tgt ? nt : null,
-        h('div', { class: 'r' }, tgt ? BTN(`📌 ${A.itemLabel(tgt)}에 계속 붙여 두기`, async () => { const id = await putRef(x.src); tgt.refs = [...(tgt.refs || []), { id, kind: x.aspect === 'outfit' ? 'outfit' : x.aspect === 'look' ? 'look' : 'face', note: x.note || undefined }]; A.commit(); st.extraRefs.splice(i, 1); toast(`📎 ${A.itemLabel(tgt)}에 참고 사진을 붙였습니다 — 다음 렌더부터 자동으로 반영됩니다`, 5000); draw(); }, 'c') : null, BTN('빼기', () => { st.extraRefs.splice(i, 1); draw(); }, 'c')))); };
+    const tgtOf = x => x.use && x.use !== 'style' ? A.items.find(q => 'i:' + q.id === x.use || 'p:' + q.id === x.use) || null : null;
+    const nRefs = () => refOwners().reduce((n, g) => n + g.refs.length, 0);
+    const curSkip = () => skipBy(st.extraRefs.map(x => ({ tgt: tgtOf(x), aspect: x.aspect })).filter(x => x.tgt));
+    const budget = () => Math.max(0, MAXI - 1 - (st.guide ? 1 : 0) - Math.min(4, st.extraRefs.length));
+    const defUse = () => { const s0 = A.sel, so = s0 && s0.k === 'item' ? s0.o : null, ppl = A.items.filter(x => x.type === 'person'); if (so && so.type === 'person') return 'i:' + so.id; if (ppl.length === 1) return 'i:' + ppl[0].id; if (so) return 'i:' + so.id; return ppl.length ? 'i:' + ppl[0].id : 'style'; };
+    const xfi = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true }); xfi.onchange = async () => { for (const f of xfi.files) st.extraRefs.push({ src: await fileToDataURL(f, 1600, 0.88), crop: null, use: defUse(), aspect: 'look', note: '' }); xfi.value = ''; draw(); };
+    const P_ASP = [['look', '얼굴+헤어+옷 전체'], ['facehair', '얼굴+헤어'], ['face', '얼굴만'], ['outfit', '옷차림만']], I_ASP = [['look', '전체 모양·재질'], ['shape', '모양·형태'], ['material', '재질·색감'], ['detail', '디테일']];
+    const ITEM_ASP_EN = { look: 'same overall design, shape, materials and colors', shape: 'same shape and form', material: 'same materials, textures and colors', detail: 'same details (hardware, stitching, edges)' };
+    const identLine = (x, n, vk, w, hh) => {
+      const t = x.tgt, bx = A.itemBox(vk, w, hh, t), where = bx ? ` (in image #1 at x ${bx.l}–${bx.r}%, y ${bx.t}–${bx.b}% of the frame)` : '', who = x.note ? ` — the one described as "${x.note}"` : '';
+      if (t.type === 'person') {
+        const a = x.aspect, face = a !== 'outfit', hair = a === 'look' || a === 'facehair', cloth = a === 'look' || a === 'outfit';
+        return `- ${A.itemLabel(t)}, the ${sexEN(t)}${where}, must be the SAME person as in reference image #${n}${who}: ${[face && 'identical face (eye shape, eyebrows, nose, mouth, jawline, face shape, skin tone, apparent age, facial hair, glasses)', hair && 'identical hairstyle, hair length and hair color', cloth && 'identical outfit (same garments, cut, colors, patterns, layering, shoes and accessories)'].filter(Boolean).join('; ')}. Ignore the simplified 3D ${[face && 'face', hair && 'hair', cloth && 'clothing'].filter(Boolean).join('/')} of this person in image #1; take ONLY body position, size, orientation and pose from image #1. Do not copy the reference photo's pose, background or any other person in it.`;
+      }
+      return `- ${A.itemLabel(t)} "${t.name}"${where}: make it look like the object in reference image #${n}${who} — ${ITEM_ASP_EN[x.aspect] || ITEM_ASP_EN.look} — while keeping its exact position, footprint, size and orientation from image #1.`;
+    };
+    const xrRow = (x, i) => {
+      const ppl = A.items.filter(q => q.type === 'person'), oth = A.items.filter(q => q.type !== 'person'), tgt = tgtOf(x), isP = !!tgt && tgt.type === 'person';
+      const us = h('select', {}, h('option', { value: 'style' }, '공간 분위기·스타일 참고'),
+        ppl.length ? h('optgroup', { label: '사람' }, ppl.map(q => h('option', { value: 'i:' + q.id }, `→ ${A.itemLabel(q)} ${q.name}`))) : null,
+        oth.length ? h('optgroup', { label: '가구·소품' }, oth.map(q => h('option', { value: 'i:' + q.id }, `→ ${A.itemLabel(q)} ${q.name}`))) : null);
+      us.value = tgt ? 'i:' + tgt.id : 'style';
+      us.onchange = () => { x.use = us.value; const t2 = tgtOf(x), al = t2 && t2.type === 'person' ? P_ASP : I_ASP; if (!al.some(z => z[0] === x.aspect)) x.aspect = 'look'; draw(); };
+      const as = h('select', {}, (isP ? P_ASP : I_ASP).map(([k, n]) => h('option', { value: k }, n))); as.value = x.aspect; as.onchange = () => { x.aspect = as.value; draw(); };
+      const nt = h('input', { type: 'text', value: x.note, placeholder: isP ? '사진 속 어느 사람? 예: 왼쪽에서 3번째 서 있는 남자' : '사진 속 어느 물건? 예: 가운데 원목 책장' }); nt.oninput = () => { x.note = nt.value; };
+      const im = h('img', { src: x.crop || x.src, title: '크게 보기', onclick: () => viewImg(x.crop || x.src, x.crop ? '잘라낸 부분 (이 부분만 보냄)' : '참고 사진') });
+      const kindOf = () => isP ? ({ outfit: 'outfit', look: 'look', facehair: 'face', face: 'face' })[x.aspect] || 'look' : x.aspect;
+      return h('div', { class: 'xrr' }, h('div', { class: 'xri' }, im, x.crop ? h('small', { class: 'xrc' }, '✂ 이 부분만 보냄') : null),
+        h('div', { class: 'xrf' }, us, tgt ? as : null, tgt ? nt : null,
+          tgt ? h('div', { class: 'r' },
+            BTN(x.crop ? '✂ 다시 자르기' : '✂ 대상만 잘라내기', () => cropDialog(x.src, c => { x.crop = c; draw(); }, x.note, isP), 'c'),
+            BTN('🤖 메모로 자동 찾기', async e => { if (!x.note) return toast('메모 칸에 사진 속 대상(예: 왼쪽에서 3번째 서 있는 남자)을 적어 주세요'); e.target.disabled = true; e.target.textContent = '찾는 중…'; try { x.crop = await findInPhoto(x.src, x.note, isP); toast('✂ 사진에서 대상을 찾아 잘라냈습니다 — 썸네일을 눌러 맞는지 확인하세요', 5000, null, { type: 'ok' }); } catch (err) { toast('⚠ ' + err.message, 6000); } draw(); }, 'c'),
+            x.crop ? BTN('전체 사진 쓰기', () => { x.crop = null; draw(); }, 'c') : null) : null,
+          h('div', { class: 'r' }, tgt ? BTN(`📌 ${A.itemLabel(tgt)}에 계속 붙여 두기`, async () => { const id = await putRef(x.crop || x.src); tgt.refs = [...(tgt.refs || []), { id, kind: kindOf(), note: x.note || undefined }]; A.commit(); st.extraRefs.splice(i, 1); toast(`📎 ${A.itemLabel(tgt)}에 참고 사진을 붙였습니다 — 다음 렌더부터 자동으로 반영됩니다`, 5000, null, { type: 'ok' }); draw(); }, 'c') : null, BTN('빼기', () => { st.extraRefs.splice(i, 1); draw(); }, 'c'))));
+    };
+    // 붙여 둔 참고 사진 목록 (객체별 · 보냄/제외 표시)
+    const refList = () => {
+      const plan = planRefs(budget(), curSkip());
+      if (!plan.length) return h('p', { class: 'mu sm' }, '붙여 둔 참고 사진이 없습니다. 3D에서 객체를 선택 → 선택 탭의 「📎 참고 사진」에서 객체마다 붙이거나, 아래 「이번 렌더용 참고 사진 추가」에서 대상을 지정하세요.');
+      const groups = []; plan.forEach(p => { let g = groups.find(z => z.o === p.o); if (!g) groups.push(g = { o: p.o, list: [] }); g.list.push(p); });
+      return h('div', { class: 'arl' }, groups.map(g => {
+        const sp = g.o === 'space', it = sp ? null : g.o, kinds = REF_KINDS[sp ? 'space' : it.type === 'person' ? 'person' : 'item'];
+        return h('div', { class: 'arb' },
+          h('div', { class: 'arh' }, sp ? h('b', {}, '🏠 공간 전체') : h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: it.refUse !== 0, onchange: e => { it.refUse = e.target.checked ? undefined : 0; A.commit(); draw(); } }), h('b', {}, A.itemLabel(it)), ' ' + it.name),
+            h('small', { class: 'mu' }, `${g.list.filter(p => p.send).length}/${g.list.length}장 보냄`), !sp && A.selectItem ? BTN('선택', () => A.selectItem(it), 'c') : null),
+          h('div', { class: 'arg' }, g.list.map(p => {
+            const img = h('img', { alt: '' }); getRef(p.r.id).then(src => { if (src) img.src = src; else img.alt = '(이 기기에 없음)'; });
+            img.onclick = () => img.src && viewImg(img.src, `${sp ? '공간' : A.itemLabel(it)} · ${(kinds.find(k => k[0] === p.r.kind) || [])[1] || p.r.kind}${p.r.note ? ' · ' + p.r.note : ''}`);
+            const ks = h('select', {}, kinds.map(([k, n]) => h('option', { value: k }, n))); ks.value = p.r.kind; ks.onchange = () => { p.r.kind = ks.value; A.commit(); };
+            return h('div', { class: 'arc' + (p.send ? '' : ' off') }, img, ks,
+              h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: p.r.use !== 0, onchange: e => { p.r.use = e.target.checked ? undefined : 0; A.commit(); draw(); } }), p.send ? '보냄' : p.why));
+          })));
+      }));
+    };
     const body = h('div', {}), res = h('div', { class: 'rgrid' });
     const draw = () => {
       body.innerHTML = '';
@@ -409,9 +507,11 @@ ${sceneText(viewKey)}`;
             A.items.some(x => x.type === 'person') ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.faces, onchange: e => { st.faces = e.target.checked; } }), '👤 사람 얼굴 사진도 실사에 반영 (안전 필터에 자주 걸리면 끄세요)') : null,
             A.items.some(x => x.type === 'person') ? h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.noPeople, onchange: e => { st.noPeople = e.target.checked; } }), '사람 빼고 공간만 실사로') : null,
             h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.guide, onchange: e => { st.guide = e.target.checked; } }), '🧭 구조 고정 (창·문·가구 위치·크기 가이드를 함께 보내 왜곡 방지 — 권장)'),
-            h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.useRefs, onchange: e => { st.useRefs = e.target.checked; } }), `📎 선택 탭에서 가구·사람·공간에 붙여 둔 참고 사진 반영 (${nRefs()}장)${st.extraRefs.length ? ` · 이번 렌더용 ${st.extraRefs.length}장은 아래에서 따로 지정` : ''}`)),
+            h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.useRefs, onchange: e => { st.useRefs = e.target.checked; draw(); } }), `📎 선택 탭에서 가구·사람·공간에 붙여 둔 참고 사진 반영 (${nRefs()}장 중 ${planRefs(budget(), curSkip()).filter(p => p.send).length}장 보냄)`)),
+          st.useRefs ? h('details', { class: 'arw', ontoggle: e => { st.refOpen = e.target.open; }, open: !!st.refOpen }, h('summary', {}, `📋 붙여 둔 참고 사진 목록 (객체별 ${nRefs()}장) — 눌러서 보기·끄기`), refList()) : null,
           h('div', { class: 'r' }, BTN('📎 이번 렌더용 참고 사진 추가', () => xfi.click(), 'c'), xfi, st.extraRefs.length ? BTN(`참고 ${st.extraRefs.length}장 지우기`, () => { st.extraRefs = []; draw(); }, 'c') : null),
-          st.extraRefs.length ? h('div', { class: 'xrl' }, st.extraRefs.map(xrRow)) : null,
+          st.extraRefs.length ? h('div', { class: 'xrl' }, h('p', { class: 'mu sm' }, '이번 렌더용 사진마다 적용할 대상(사람·가구·소품)과 항목을 고르세요. 단체 사진이면 「✂ 대상만 잘라내기」나 메모 + 「🤖 메모로 자동 찾기」로 그 사람만 잘라 보내야 정확합니다.'), st.extraRefs.map(xrRow)) : null,
+          st.extraRefs.some(x => { const t = tgtOf(x); return t && t.type === 'person'; }) && im.provider !== 'gemini' ? h('p', { class: 'warn sm' }, '💡 사람 얼굴·옷을 사진과 똑같이 맞추는 건 Gemini 이미지 모델(Nano Banana Pro)이 더 잘 따릅니다.') : null,
           h('p', { class: 'mu sm' }, '참고 사진: 얼굴·옷·체형·자세(사람), 재질·모양(가구), 분위기(공간)를 실사 이미지에 맞춰 반영합니다. 선택 탭의 「📎 참고 사진」에서 객체마다 붙일 수 있습니다.'),
           F('이미지 모델', modelPicker('image', draw)),
           h('p', { class: 'mu sm' }, `${PROVIDERS[im.provider]?.name} · ${im.model}${im.key ? '' : ' — ⚠ 키 없음 (⚙ AI 설정)'} · 배치·크기·재질·조명 설정이 프롬프트에 그대로 들어갑니다.`)) : null,
@@ -429,30 +529,41 @@ ${sceneText(viewKey)}`;
         res.prepend(card);
         try {
           const cap = A.captureView(vk, Math.round(W * (st.ai ? sc : 1)), Math.round(H * (st.ai ? sc : 1)));
-          let out = cap;
+          let out = cap, info = '';
           if (st.ai) {
             card.querySelector('small').textContent = `${name} · AI 생성 중… (20~90초)`;
             const cw = Math.round(W * sc), ch = Math.round(H * sc), guide = st.guide ? A.captureGuide(vk, cw, ch) : null, lay = st.guide ? A.layoutText(vk, cw, ch) : '';
-            const start = guide ? 3 : 2, rr = st.useRefs ? await collectRenderRefs(st.extraRefs.length ? 6 : 9, start) : { imgs: [], text: '' }, xo = st.extraRefs.slice(0, 4), xr = xo.map(x => x.src), x0 = start + rr.imgs.length;
-            const xt = xo.length ? '\n' + xo.map((x, k) => { const n = x0 + k, tgt = x.use.startsWith('p:') ? A.items.find(q => 'p:' + q.id === x.use) : null; return tgt ? `Reference image #${n} → ${A.itemLabel(tgt)} (${personEN(tgt)}): give this person the ${ASP_EN[x.aspect] || ASP_EN.face} of ${x.note ? `"${x.note}"` : 'the person'} in that photo, as faithfully as possible. Keep ${A.itemLabel(tgt)}'s position, size and current pose exactly as in image #1 (do not copy the photo's pose, background or other people).` : `Reference image #${n}: match its overall style, lighting and materials only (never its layout or people).`; }).join(' ') + (st.extra ? ` User's note about these references: ${st.extra}` : '') : '';
-            const xrSafe = xo.filter(x => !x.use.startsWith('p:')).map(x => x.src);
+            const small = card.querySelector('small'), people = A.items.filter(x => x.type === 'person');
+            const xo = st.extraRefs.slice(0, 4).map(x => ({ ...x, tgt: tgtOf(x), orig: x }));
+            // 메모만 적고 자르지 않은 사진 → 사진 속 대상을 자동으로 찾아 그 부분만 보냄 (실패하면 전체 사진)
+            for (const x of xo) if (x.tgt && x.note && !x.crop && modelFor('vision').key) { try { small.textContent = `${name} · 참고 사진에서 「${x.note}」 찾는 중…`; x.crop = x.orig.crop = await findInPhoto(x.src, x.note, x.tgt.type === 'person'); } catch (e) { console.warn('find', e); } }
+            const xid = xo.filter(x => x.tgt), xsty = xo.filter(x => !x.tgt), xidImgs = xid.map(x => x.crop || x.src);
+            const start = guide ? 3 : 2, rr = st.useRefs ? await collectRenderRefs(Math.max(0, MAXI - (start - 1) - xo.length), start + xid.length, skipBy(xid)) : { imgs: [], text: '', map: new Map() };
+            const sty0 = start + xid.length + rr.imgs.length;
+            const RM = new Map(), RM0 = new Map(), addRM = (m, id, n, kind) => { if (!m.has(id)) m.set(id, []); m.get(id).push({ n, kind }); };
+            xid.forEach((x, k) => { addRM(RM, x.tgt.id, start + k, x.aspect); addRM(RM0, x.tgt.id, start + k, x.aspect); });
+            rr.map.forEach((arr, id) => arr.forEach(z => addRM(RM, id, z.n, z.kind)));
+            const identTxt = xid.length ? '\nREFERENCE TARGETS (highest priority after geometry — follow exactly):\n' + xid.map((x, k) => identLine(x, start + k, vk, cw, ch)).join('\n') : '';
+            const xt = xsty.length ? `\nStyle reference image${xsty.length > 1 ? 's' : ''} #${sty0}${xsty.length > 1 ? '–#' + (sty0 + xsty.length - 1) : ''}: match overall style, lighting and materials only (never layout or people).` : '';
+            const xrSafe = xsty.map(x => x.src);
             const gt = guide ? `\nSTRUCTURE GUIDE: image #2 is a flat-color map rendered from EXACTLY the same camera as image #1 (it is not a style reference): gray = walls/floor/ceiling, BLUE = window frames, light blue = window glass, ORANGE = door frames/panels, light orange = door glass, yellow = light fixtures, each furniture piece = its own flat color listed below. Use it only to lock geometry: every window, door, wall edge and object in your photo must cover the same pixel region as in the guide. Never enlarge, shrink or move a window; never move a door to a different wall; never mirror the scene; whatever is nearest to the camera in image #1 stays nearest.\nEXACT OPENINGS & OBJECTS FROM THE 3D MODEL:\n${lay}` : '';
-            const prompt = renderPrompt(vk, st) + gt + rr.text + xt;
+            REFCTX = RM; const prompt = renderPrompt(vk, st) + identTxt + gt + rr.text + xt; REFCTX = RM0; const idPrompt = renderPrompt(vk, st) + identTxt + gt; REFCTX = null;
             card._prompt = prompt;
-            const people = A.items.filter(x => x.type === 'person'), small = card.querySelector('small');
-            const peopleRefs = new Set(); for (const x of people) for (const r of (x.refs || [])) { const src = await getRef(r.id); if (src) peopleRefs.add(src); }
-            // 안전 필터 오탐 대비 (결과 이미지 검사는 1회 1분 가까이 걸려서 단계 수를 최소로):
-            // 1) 그대로 → 2) 사람이 있으면: 얼굴 사진·사람 참고 사진 빼고 다시 캡처 + 사람 묘사 단순화 → 3) 사람 없이 → 4) 다른 이미지 AI(키가 쓸 수 있을 때만)
-            const hideFaces = fn => { const hid = []; people.forEach(x => x.g && x.g.traverse(o => { if (o.userData.faceTex && o.visible) { o.visible = false; hid.push(o); } })); try { return fn(); } finally { hid.forEach(o => { o.visible = true; }); } };
-            const hasFace = people.some(x => x.face);
+            // 참고 사진으로 바꿀 사람은 3D의 단순 얼굴 텍스처를 숨긴 화면을 보냄 (서로 다른 얼굴 정보가 섞이지 않게)
+            const idPeople = [...new Set(xid.filter(x => x.tgt.type === 'person' && x.aspect !== 'outfit').map(x => x.tgt))];
+            const hideFacesOf = (list, fn) => { const hid = []; list.forEach(x => x.g && x.g.traverse(o => { if (o.userData.faceTex && o.visible) { o.visible = false; hid.push(o); } })); try { return fn(); } finally { hid.forEach(o => { o.visible = true; }); } };
+            const capId = idPeople.length ? hideFacesOf(idPeople, () => A.captureView(vk, cw, ch)) : cap;
+            const hideFaces = fn => hideFacesOf(people, fn);
+            const hasFace = people.some(x => x.face) || idPeople.length > 0;
             const styleTxt = xrSafe.length ? ` Style reference image${xrSafe.length > 1 ? 's' : ''} #${start}${xrSafe.length > 1 ? '–#' + (start + xrSafe.length - 1) : ''}: match overall style, lighting and materials only (never layout or people).` : '';
             const plainPrompt = renderPrompt(vk, st) + gt + styleTxt + `\nPeople in the scene are ordinary, generic, non-identifiable adults in everyday clothes (${people.map(x => personEN(x, true)).join('; ')}). Do not depict any real or identifiable person.`;
-            let tries = [{ n: '기본', im, prompt, image: cap, refs: [...(guide ? [guide] : []), ...rr.imgs, ...xr] }];
+            let tries = [{ n: '기본', im, prompt, image: capId, refs: [...(guide ? [guide] : []), ...xidImgs, ...rr.imgs, ...xrSafe], keepId: true }];
+            if (xid.length && (rr.imgs.length || xrSafe.length)) tries.push({ n: '지정한 참고 사진만', im, prompt: idPrompt, image: capId, refs: [...(guide ? [guide] : []), ...xidImgs], keepId: true });
             if (people.length) tries.push({ n: hasFace ? '얼굴 사진 빼고' : '사람 묘사 단순화', im, prompt: plainPrompt, recap: 'faces', refs0: [...xrSafe] });
             if (people.length) tries.push({ n: '사람 제외', im, noPeople: true });
             const other = ['gemini', 'openai'].filter(p => p !== im.provider).map(p => ({ provider: p, model: (PROVIDERS[p].image[0] || [])[0], key: keyOf(p) })).find(x => x.key && x.model);
-            if (other) tries.push({ n: (PROVIDERS[other.provider] || {}).name + '로', im: other, prompt: people.length ? plainPrompt : prompt, recap: people.length ? 'faces' : null, refs0: people.length ? [...xrSafe] : [...rr.imgs, ...xr], soft: true });
-            if (people.length && st.noPeople) tries = tries.filter(t => t.noPeople || t.soft); else if (people.length && !st.faces) tries = tries.slice(1);
+            if (other) tries.push({ n: (PROVIDERS[other.provider] || {}).name + '로', im: other, prompt: people.length ? plainPrompt : prompt, recap: people.length ? 'faces' : null, refs0: people.length ? [...xrSafe] : [...xidImgs, ...rr.imgs, ...xrSafe], keepId: !people.length, soft: true });
+            if (people.length && st.noPeople) tries = tries.filter(t => t.noPeople || t.soft); else if (people.length && !st.faces) tries = tries.filter(t => !t.keepId);
             let gen = null, lastErr = null, used = null; const notes = [];
             for (let ti = 0; ti < tries.length; ti++) {
               const t = tries[ti];
@@ -469,18 +580,21 @@ ${sceneText(viewKey)}`;
             if (!gen) throw new Error(`이미지 AI 안전 필터가 계속 거절했습니다 (${notes.join(' → ')}). ${people.length ? '사람 객체의 얼굴 사진·참고 사진을 빼거나, 렌더 창에서 사람이 안 보이는 각도를 골라 보세요. ' : ''}Gemini 키(크레딧이 남은)를 추가하면 자동으로 함께 시도합니다.`);
             if (used !== tries[0]) toast(`ℹ 안전 필터 거절을 피해 「${used.n}」 방식으로 생성했습니다${used.noPeople ? ' — 사람은 빠진 이미지입니다' : used.recap === 'faces' && hasFace ? ' — 얼굴 사진은 반영되지 않았습니다' : ''}`, 7000);
             out = await coverResize(gen, W, H);
+            if (xid.length || rr.imgs.length) info = used.keepId ? `✓ 참고 사진 반영: ${[xid.length && `이번 렌더용 ${xid.length}장`, used === tries[0] && rr.imgs.length && `붙여 둔 ${rr.imgs.length}장`].filter(Boolean).join(' + ')}` : `⚠ 안전 필터 때문에 「${used.n}」 방식으로 생성 — 인물 참고 사진이 빠져서 다른 사람·옷으로 보일 수 있어요`;
+            card._sent = { prompt: used.prompt, imgs: [used.image, ...(used.refs || [])] };
           }
-          showResult(card, out, cap, name, W, H);
+          showResult(card, out, cap, name, W, H, info);
           toast(st.ai ? `🎨 실사 이미지 완성 — ${name} (${W}×${H})` : `📷 캡처 완료 — ${name}`, 6000, ['보기', () => { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); const im2 = card.querySelector('img'); if (im2) im2.click(); }], { type: 'ok', sys: true, title: '실사 이미지 완성' });
         } catch (e) { card.innerHTML = ''; card.append(h('p', { class: 'warn' }, `${name}: ${e.message}`)); toast(`⚠ ${name} 생성 실패: ${e.message}`, 9000, null, { type: 'err', sys: true }); }
       }
     };
-    const showResult = (card, url, cap, name, W, H) => {
-      card.innerHTML = '';
+    const showResult = (card, url, cap, name, W, H, info) => {
+      const sent = card._sent; card.innerHTML = '';
       const img = h('img', { src: url, alt: name, onclick: () => viewImg(img.src, name) });
       const file = A.fname(`${name}_${W}x${H}.png`.replace(/\s|·/g, ''));
-      app(card, img, h('small', {}, `${name} · ${W}×${H}`),
+      app(card, img, h('small', {}, `${name} · ${W}×${H}`), info ? h('small', { class: info.startsWith('⚠') ? 'warn' : 'okc' }, info) : null,
         h('div', { class: 'r' }, BTN('저장·공유', () => A.saveFile(file, url, 'image/png', { preview: A.isMobile() }), 'c'),
+          sent ? BTN('보낸 사진·지시문', () => modal('AI에 보낸 내용', h('div', {}, h('p', { class: 'mu sm' }, '번호는 지시문의 image #번호와 같습니다. #1 = 3D 화면, 구조 고정이 켜져 있으면 #2 = 구조 가이드.'), h('div', { class: 'sentg' }, sent.imgs.map((u, k) => h('figure', {}, h('img', { src: u, onclick: () => viewImg(u, '#' + (k + 1)) }), h('figcaption', {}, '#' + (k + 1))))), h('pre', { class: 'pre' }, sent.prompt || '')), { wide: true }), 'c') : null,
           st.ai ? BTN('3D 원본', () => { img.src = img.src === url ? cap : url; }, 'c') : null,
           BTN('☁ 갤러리', async e => { if (!Cloud.user) return toast('클라우드 갤러리는 로그인 후 사용할 수 있습니다'); e.target.disabled = true; try { await Cloud.saveGallery('g' + Date.now().toString(36), await toGalleryDoc(url, { name, project: A.projName, size: `${W}x${H}`, style: st.style })); toast('갤러리에 저장했습니다'); } catch (err) { toast(err.message); } e.target.disabled = false; }, 'c')));
     };
@@ -568,12 +682,17 @@ JSON 하나만: {"set":{바꿀 값만 — ${PERSON_KEYS}},"face":{"img":얼굴 �
       toast('✅ ' + (j.note || '참고 사진 내용을 반영했습니다') + ' (Ctrl+Z 되돌리기)', 6000); done && done(j, log);
     } catch (e) { toast('⚠ ' + e.message, 7000); }
   }
-  // 실사 렌더에 넣을 참고 사진 모으기 (사람 얼굴·옷 / 가구 느낌 / 공간 분위기)
-  async function collectRenderRefs(max = 10, start = 2) {
-    const out = [], lines = [], add = async (r, who) => { if (out.length >= max) return; const src = await getRef(r.id); if (!src) return; out.push(src); lines.push(`Reference image #${start + out.length - 1} → ${who}: match its ${REF_EN[r.kind] || 'look'}${r.note ? ' (' + r.note + ')' : ''}.`); };
-    for (const r of (A.R.refs || []).filter(r => r.use !== 0)) await add(r, 'the whole space');
-    for (const it of A.items) { if (it.refUse === 0) continue; for (const r of (it.refs || []).slice(0, 3)) await add(r, `${A.itemLabel(it)} "${it.name}"${it.type === 'person' ? ` (the ${it.sex === 'f' ? 'woman' : it.sex === 'c' ? 'child' : 'man'} ${it.h}cm tall)` : ` (${A.TYPES[it.type] || it.type}, ${it.w}x${it.d}x${it.h}cm)`}`); }
-    return { imgs: out, text: lines.length ? `\nREFERENCE IMAGES: image #1 is the 3D layout to transform; images from #${start} are references for specific objects. ${lines.join(' ')} Apply each reference ONLY to its object and only for the named aspect; keep positions, sizes and camera from image #1. This is an ordinary interior/architecture visualization; keep each person's everyday outfit exactly as described.` : '' };
+  // 실사 렌더에 넣을 참고 사진 모으기 (사람 얼굴·옷 / 가구 느낌 / 공간 분위기) — planRefs와 같은 규칙
+  async function collectRenderRefs(max = 10, start = 2, skip) {
+    const out = [], lines = [], map = new Map();
+    for (const p of planRefs(max, skip)) {
+      if (!p.send) continue; const src = await getRef(p.r.id); if (!src) continue;
+      out.push(src); const n = start + out.length - 1, it = p.o === 'space' ? null : p.o;
+      if (it) { if (!map.has(it.id)) map.set(it.id, []); map.get(it.id).push({ n, kind: p.r.kind }); }
+      const who = !it ? 'the whole space' : `${A.itemLabel(it)} "${it.name}"${it.type === 'person' ? ` (the ${sexEN(it)} ${it.h}cm tall)` : ` (${A.TYPES[it.type] || it.type}, ${it.w}x${it.d}x${it.h}cm)`}`;
+      lines.push(`Reference image #${n} → ${who}: match its ${REF_EN[p.r.kind] || 'look'}${p.r.note ? ' (' + p.r.note + ')' : ''}${it && it.type === 'person' && ['face', 'look', 'hair'].includes(p.r.kind) ? ' — same person, same face and hairstyle' : ''}.`);
+    }
+    return { imgs: out, map, text: lines.length ? `\nATTACHED REFERENCE IMAGES (from #${start}): ${lines.join(' ')} Apply each reference ONLY to its object and only for the named aspect; keep positions, sizes, poses and camera from image #1.` : '' };
   }
   return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace, openLink, copyCfgFile, analyzeRefs, collectRenderRefs };
 }

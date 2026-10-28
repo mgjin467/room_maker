@@ -1442,9 +1442,11 @@ function captureGuide(k, w, h) {
   } finally { saved.forEach(([o, m]) => { o.material = m; }); made.forEach(m => m.dispose()); scene.background = bg; scene.fog = fog; }
 }
 // 카메라 기준으로 창호·가구가 화면 어디에, 어느 벽에, 얼마나 크게 있는지
+function boxOn(c, obj) { const b = new THREE.Box3().setFromObject(obj); if (b.isEmpty()) return null; let x0 = 1, y0 = 1, x1 = -1, y1 = -1, any = false; for (let i = 0; i < 8; i++) { const v = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(c); if (v.z > 1 || v.z < -1) continue; any = true; x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); } if (!any) return null; const cl = v => Math.max(-1, Math.min(1, v)); x0 = cl(x0); x1 = cl(x1); y0 = cl(y0); y1 = cl(y1); if (x1 - x0 < 0.005 || y1 - y0 < 0.005) return null; const P = v => Math.round((v + 1) * 50); return { l: P(x0), r: P(x1), t: 100 - P(y1), b: 100 - P(y0), area: (x1 - x0) * (y1 - y0) }; }
+function itemBox(k, w, h, it) { if (!it || !it.g) return null; return boxOn(viewCam(k, w, h), it.g); }
 function layoutText(k, w, h) {
   const c = viewCam(k, w, h), fwd = new THREE.Vector3(); c.getWorldDirection(fwd); const f = [fwd.x, fwd.z], fl = Math.hypot(...f) || 1; f[0] /= fl; f[1] /= fl; const rt = [-f[1], f[0]];
-  const box2 = obj => { const b = new THREE.Box3().setFromObject(obj); if (b.isEmpty()) return null; let x0 = 1, y0 = 1, x1 = -1, y1 = -1, any = false; for (let i = 0; i < 8; i++) { const v = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(c); if (v.z > 1 || v.z < -1) continue; any = true; x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); } if (!any) return null; const cl = v => Math.max(-1, Math.min(1, v)); x0 = cl(x0); x1 = cl(x1); y0 = cl(y0); y1 = cl(y1); if (x1 - x0 < 0.005 || y1 - y0 < 0.005) return null; const P = v => Math.round((v + 1) * 50); return { l: P(x0), r: P(x1), t: 100 - P(y1), b: 100 - P(y0), area: (x1 - x0) * (y1 - y0) }; };
+  const box2 = obj => boxOn(c, obj);
   const side = e => { const n = e.n, d = n[0] * f[0] + n[1] * f[1], sd = (c.position.x - e.a[0]) * n[0] + (c.position.z - e.a[1]) * n[1]; if (d > 0.6) return sd < 0 ? 'FRONT wall that the camera stands just outside of / looks through (it is in the immediate FOREGROUND, nearest to the viewer)' : 'wall behind the camera'; if (d < -0.6) return 'BACK wall directly facing the camera (far side)'; return (n[0] * rt[0] + n[1] * rt[1]) > 0 ? 'LEFT wall' : 'RIGHT wall'; };
   const L = [];
   if (R.kind !== 'out') OPS.forEach(o => {
@@ -1657,8 +1659,10 @@ function bnum(get, set, o = {}) {
   const i = h('input', { type: 'number', step: o.step ?? 1, min: o.min, max: o.max, inputmode: 'decimal' });
   const sync = () => { const v = get(); i.value = v == null || !isFinite(v) ? '' : r1(v); }; sync(); BIND.push([i, sync]);
   const apply = v => { if (!isFinite(v)) return; if (o.min != null && v < o.min) return; if (o.max != null && v > o.max) return; set(v); };
-  i.oninput = () => apply(parseFloat(i.value));
-  i.onchange = () => { sync(); commitSoon(0); };
+  // 모바일: 지우고 고치는 중간값(예: 1830 → 18 → 1850)이 바로 적용돼 다른 가구가 밀리지 않게, 입력을 마치면(완료·Enter·다른 곳 누르기) 적용
+  i.oninput = () => { if (!document.body.classList.contains('mob')) apply(parseFloat(i.value)); };
+  i.onchange = () => { apply(parseFloat(i.value)); sync(); commitSoon(0); };
+  i.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); i.blur(); } };
   const st = o.step ?? 1, mb = h('button', { class: 'stp', type: 'button', tabindex: -1, onclick: () => { apply(r1((parseFloat(i.value) || 0) - st)); sync(); commitSoon(); } }, '−'), pb = h('button', { class: 'stp', type: 'button', tabindex: -1, onclick: () => { apply(r1((parseFloat(i.value) || 0) + st)); sync(); commitSoon(); } }, '+');
   return h('div', { class: 'num' }, mb, i, pb);
 }
@@ -1739,7 +1743,7 @@ function setSheet(s, px) { sheetState = s; const v = px ?? sheetPx(s); document.
   g.addEventListener('mousedown', e => { if (!mq.matches) return; begin(e.clientY, e.clientX, 'grab'); const mm = ev => move(ev.clientY, ev.clientX), mu = ev => { removeEventListener('mousemove', mm); removeEventListener('mouseup', mu); end(ev.clientY); }; addEventListener('mousemove', mm); addEventListener('mouseup', mu); });
   // 내용이 맨 위일 때 아래로 당기면 시트 내리기
   let pull = null;
-  P.addEventListener('touchstart', e => { if (!mq.matches || e.touches.length > 1 || e.target.closest('#grab,#tabs,.rsz')) return; const sec = e.target.closest('#p>section'); if (!sec) return; const t = e.touches[0]; pull = { sec, y: t.clientY, x: t.clientX, top: sec.scrollTop <= 0, act: false }; }, { passive: true });
+  P.addEventListener('touchstart', e => { if (!mq.matches || e.touches.length > 1 || e.target.closest('#grab,#tabs,.rsz,input,textarea,select,[contenteditable]')) return; const sec = e.target.closest('#p>section'); if (!sec) return; const t = e.touches[0]; pull = { sec, y: t.clientY, x: t.clientX, top: sec.scrollTop <= 0, act: false }; }, { passive: true });
   P.addEventListener('touchmove', e => {
     if (!pull) return; const t = e.touches[0], dy = t.clientY - pull.y, dx = t.clientX - pull.x;
     if (!pull.act) { if (pull.top && pull.sec.scrollTop <= 0 && dy > 10 && dy > Math.abs(dx) * 1.5 && !e.target.closest('input[type=range],.hs,textarea,.chatlog,.rsz,.rugpats')) { pull.act = true; begin(t.clientY, t.clientX, 'pull'); st.on = true; document.body.classList.add('sheet-drag'); } else return; }
@@ -1752,7 +1756,7 @@ function setSheet(s, px) { sheetState = s; const v = px ?? sheetPx(s); document.
   const scrollable = (el, dy, dx) => {
     for (let n = el; n && n !== document.body; n = n.parentElement) {
       if (n.id === 'c' || n.tagName === 'CANVAS') return true; // 3D 화면은 자체 처리(touch-action:none)
-      if (n.matches && n.matches('input[type=range]')) return true;
+      if (n.matches && n.matches('input[type=range],input:not([type=checkbox]):not([type=radio]),textarea,[contenteditable]')) return true; // 입력칸 안에서 커서 옮기기·글자 선택
       const cs = getComputedStyle(n);
       if (Math.abs(dy) >= Math.abs(dx)) { if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 1) { if ((dy > 0 && n.scrollTop > 0) || (dy < 0 && n.scrollTop + n.clientHeight < n.scrollHeight - 1)) return true; } }
       else if (/(auto|scroll)/.test(cs.overflowX) && n.scrollWidth > n.clientWidth + 1) return true;
@@ -1769,7 +1773,35 @@ function setSheet(s, px) { sheetState = s; const v = px ?? sheetPx(s); document.
   const reset = () => { if (document.body.classList.contains('mob') && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0); };
   document.addEventListener('focusout', () => setTimeout(reset, 60));
   window.addEventListener('scroll', () => { if (!document.activeElement || !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) reset(); }, { passive: true });
-  if (window.visualViewport) visualViewport.addEventListener('resize', () => setTimeout(reset, 80));
+  if (window.visualViewport) visualViewport.addEventListener('resize', () => setTimeout(() => { if (!document.body.classList.contains('kb')) reset(); }, 80));
+})();
+// 모바일 키보드: 입력칸이 키보드에 가리지 않게 시트·창을 키보드 바로 위로 올리고, 입력칸이 보이도록 스크롤
+(() => {
+  const vv = window.visualViewport; if (!vv) return;
+  const field = el => !!el && el.matches && el.matches('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]):not([type=button]),textarea,[contenteditable=true]');
+  const root = document.documentElement; let raf = 0, tmr = 0;
+  const scrollParent = el => { for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) { const cs = getComputedStyle(n); if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 1) return n; } return null; };
+  const keep = a => { // 입력칸을 보이는 영역 안으로
+    const sp = scrollParent(a); if (!sp) return; const r = a.getBoundingClientRect(), pr = sp.getBoundingClientRect();
+    const top = Math.max(pr.top, vv.offsetTop) + 8, bot = Math.min(pr.bottom, vv.offsetTop + vv.height) - 12;
+    if (r.bottom > bot) sp.scrollTop += r.bottom - bot + 8; else if (r.top < top) sp.scrollTop -= top - r.top + 8;
+  };
+  const upd = () => {
+    raf = 0; const a = document.activeElement, mob = document.body.classList.contains('mob');
+    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)), on = mob && field(a) && kb > 80;
+    document.body.classList.toggle('kb', on);
+    root.style.setProperty('--kb', (on ? kb : 0) + 'px'); root.style.setProperty('--vvh', Math.round(vv.height) + 'px'); root.style.setProperty('--vvt', Math.round(vv.offsetTop) + 'px');
+    if (on) { clearTimeout(tmr); tmr = setTimeout(() => keep(a), 240); }
+  };
+  // 위쪽에 '지금 입력 중인 값' 표시 (키보드에 가려도 무엇이 입력되는지 확인)
+  const kbv = document.createElement('div'); kbv.id = 'kbv'; kbv.innerHTML = '<small></small><b></b>'; document.body.append(kbv);
+  const lblOf = a => { const l = a.closest('label.f,.f'); const sp = l && l.querySelector('span'); return (sp && sp.textContent) || a.getAttribute('aria-label') || a.placeholder || '입력'; };
+  const echo = () => { const a = document.activeElement; if (!field(a)) return; const big = a.tagName === 'TEXTAREA' || a.closest('.mdl,.chatin'); document.body.classList.toggle('kbm', !!big); kbv.firstChild.textContent = lblOf(a); kbv.lastChild.textContent = a.value === '' ? '(비어 있음)' : a.value; };
+  document.addEventListener('input', echo, true); document.addEventListener('focusin', () => setTimeout(echo, 0));
+  const q = () => { if (!raf) raf = requestAnimationFrame(upd); };
+  vv.addEventListener('resize', q); vv.addEventListener('scroll', q);
+  document.addEventListener('focusin', e => { if (field(e.target)) { q(); setTimeout(q, 350); setTimeout(q, 700); } });
+  document.addEventListener('focusout', () => setTimeout(q, 80));
 })();
 window.addEventListener('resize', () => { if (mq.matches) setSheet(sheetState); });
 
@@ -2049,7 +2081,8 @@ function refsSection(target) {
     const img = h('img', { alt: '참고 사진', onclick: () => img.src && viewImg(img.src, r.note || '참고 사진') }); getRef(r.id).then(src => { if (src) img.src = src; else img.alt = '(이 기기에 없음)'; });
     const ks = h('select', {}, kinds.map(([k, n]) => h('option', { value: k }, n))); ks.value = r.kind; ks.onchange = () => { r.kind = ks.value; commitSoon(0); };
     const nt = h('input', { type: 'text', placeholder: '메모 (예: 이 소파의 패브릭)', value: r.note || '' }); nt.onchange = () => { r.note = nt.value.trim() || undefined; commitSoon(0); };
-    return h('div', { class: 'refc' }, h('div', { class: 'refi', onclick: () => { if (img.src) mdl('참고 사진', h('img', { src: img.src, class: 'full' })); } }, img), ks, nt,
+    const uk = h('label', { class: 'ck sm', title: '실사 이미지 만들 때 이 사진을 보낼지' }, h('input', { type: 'checkbox', checked: r.use !== 0, onchange: e => { r.use = e.target.checked ? undefined : 0; commitSoon(0); } }), '실사에 사용');
+    return h('div', { class: 'refc' + (r.use === 0 ? ' off' : '') }, h('div', { class: 'refi' }, img), ks, nt, uk,
       h('button', { class: 'x', title: '빼기', onclick: () => { o.refs = refs.filter((_, j) => j !== i); if (!o.refs.length) delete o.refs; if (!items.some(it => (it.refs || []).some(x => x.id === r.id)) && !(R.refs || []).some(x => x.id === r.id)) delRef(r.id); commitSoon(0); rerender(); } }, '×'));
   }));
   const desc = h('textarea', { rows: 2, placeholder: isSp ? '분위기 설명 (실사 렌더에 반영) — 예: warm minimal Scandinavian, soft daylight' : '외형 설명 (실사 렌더에 반영) — AI가 사진을 분석하면 자동으로 채워집니다' }, o.desc || '');
@@ -2620,8 +2653,8 @@ function describe() {
 const API = {
   get items() { return items; }, get lights() { return LIGHTS; }, get ops() { return OPS; }, get R() { return R; }, get E() { return E; }, get sel() { return sel; }, get projName() { return projName; }, get night() { return !!PREF.night; },
   CAT, TYPES, MATS, LKIND, WIN_ST, DOOR_ST, SHAPES, COLSTY, OUTFITS, HAIRS, POSES, VIEWS, FLOORS,
-  describe, runActions, captureView, captureGuide, layoutText, notify, askNotifyPerm, planCanvas, shot3D, toast, saveFile, fname, showTab, setSheet, h, BTN, F, G, app, isMobile,
-  itemLabel, lightLabel, opLabel, grp, addPreset, placeNew, newItem, specToItem, saveCustom, saveLibDialog, renderCatalog, commit: () => commitSoon(0),
+  describe, runActions, captureView, captureGuide, layoutText, itemBox, notify, askNotifyPerm, planCanvas, shot3D, toast, saveFile, fname, showTab, setSheet, h, BTN, F, G, app, isMobile,
+  itemLabel, lightLabel, opLabel, grp, addPreset, placeNew, newItem, specToItem, saveCustom, saveLibDialog, renderCatalog, commit: () => commitSoon(0), selectItem: it => selectItems([it], it),
   newSpace({ kind, env, W, D, H, name, house = true }) { const out = kind === 'outdoor' || kind === 'out'; const st = out ? outdoorState(ENV_DEF[env] ? env : 'field', +W || 1200, +D || 1000) : roomState(+W || 350, +D || 330, +H || 230); const rooms = SPACES.filter(x => x.kind !== 'out').map(x => x.id); const id = addSpace(name || (out ? '야외' : '방'), st); if (out && house && rooms.length) placeHouses(rooms); return id; },
   applyRoomSpec(spec) {
     const pts = Array.isArray(spec.pts) && spec.pts.length >= 3 && spec.pts.every(p => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1])) ? spec.pts.map(p => [+p[0], +p[1]]) : null;
