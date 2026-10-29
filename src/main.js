@@ -708,12 +708,30 @@ function mk(it) {
     sh.rotation.x = -PI / 2; sh.position.y = 0.15; g.add(sh);
   }
   if (PREF.labels) { const s = labelSprite(`${itemLabel(it)} · ${it.name}`); s.position.y = it.h + 14; g.add(s); }
-  if (LP.length && it.on !== false && (it.lum ?? 0.8) > 0 && plCount() < MAXL) { const pl = new THREE.PointLight(kelvin(it.temp || 2900), 1, 600, 2); pl.userData.base = (it.lum ?? 0.8) * 0.8; pl.position.set(...LP[0]); g.add(pl); }
-  g.userData = { m, e, ms, ems }; it.g = g; fG.add(g); place(it);
+  if (LP.length && it.on !== false && (it.lum ?? 0.8) > 0 && plCount() < MAXL) { const pl = new THREE.PointLight(kelvin(it.temp || 2900), 1, 600, 2); pl.userData.base = (it.lum ?? 0.8) * 0.8; pl.position.set(...LP[0]); g.add(pl); g.userData.pl0 = pl; }
+  const pl0 = g.userData.pl0; g.userData = { m, e, ms, ems, pl: pl0, plY: pl0 ? pl0.position.y : 0 }; it.g = g; fG.add(g); place(it);
   if (sel && sel.o === it) { e.visible = true; addResizeHandles(it); }
   applyLightModeItem(it);
 }
-function place(it) { it.g.position.set(it.x, it.y || 0, it.z); it.g.rotation.y = (it.rot || 0) * PI / 180; }
+function place(it) { it.g.position.set(it.x, it.y || 0, it.z); it.g.rotation.y = (it.rot || 0) * PI / 180; applyFlip(it); }
+// 좌우 반전(fx: 가구 자신의 좌우 거울상) · 상하 반전(fy: 위아래 뒤집기, 차지하는 높이 범위는 그대로)
+function applyFlip(it) {
+  const u = it.g && it.g.userData, m = u && u.m; if (!m) return;
+  m.scale.set(it.fx ? -1 : 1, it.fy ? -1 : 1, 1); m.position.y = it.fy ? it.h : 0;
+  if (u.pl) u.pl.position.y = it.fy ? it.h - u.plY : u.plY;
+}
+function flipSel(axis) {
+  if (!sel) return;
+  if (isMulti()) { const list = sel.list; if (guardMulti(list)) return; if (axis === 'x') { mirrorMulti(list, 'x'); return toast(`⇋ ${list.length}개를 좌우 반전했습니다 (배치·모양 모두)`); } list.forEach(o => { o.fy = o.fy ? undefined : 1; place(o); }); upd(); syncSel(); return toast(`⇅ ${list.length}개를 상하 반전했습니다`); }
+  if (sel.k === 'item') { const it = sel.o; if (it.lock) return toast('잠긴 가구입니다'); const k = axis === 'x' ? 'fx' : 'fy'; it[k] = it[k] ? undefined : 1; place(it); upd(); syncSel(); return toast(`${axis === 'x' ? '⇋ 좌우' : '⇅ 상하'} 반전 ${it[k] ? '적용' : '해제'} — ${itemLabel(it)}`); }
+  if (sel.k === 'op') { const o = sel.o; if (lockGuard(sel)) return; if (axis !== 'x') return toast('문·창은 상하 반전할 수 없습니다'); if (o.st === 'double') return toast('양여닫이 문은 좌우가 같습니다'); o.hinge = o.hinge === 'R' ? 'L' : 'R'; buildRoom(); upd(); renderSel(); return toast(`⇋ ${opLabel(o)} 열리는 쪽을 ${o.hinge === 'R' ? '오른쪽' : '왼쪽'}으로 바꿨습니다`); }
+  toast('이 대상은 반전할 수 없습니다');
+}
+function flipRow(o) {
+  if (!(sel && (isMulti() || (sel.k === 'item' && sel.o === o) || (sel.k === 'op' && sel.o === o)))) return null;
+  const isOp = sel.k === 'op', st = h('span', { class: 'rotcur' }), sync = () => { st.textContent = isMulti() || isOp ? '' : [o.fx && '좌우 반전됨', o.fy && '상하 반전됨'].filter(Boolean).join(' · '); }; sync(); BIND.push([st, sync]);
+  return h('div', { class: 'rotc flipr' }, BTN('⇋ 좌우 반전', () => flipSel('x'), 'c', isOp ? '문 열리는 쪽(경첩) 바꾸기' : '좌우 거울상으로 (단축키 H)'), isOp ? null : BTN('⇅ 상하 반전', () => flipSel('y'), 'c', '위아래 뒤집기 (단축키 V)'), st);
+}
 function wallPut(it, e, s) { const fw = fpw(it); it.wall = e.i; it.ws = clamp(s, Math.min(fw / 2, e.len / 2), Math.max(e.len / 2, e.len - fw / 2)); const [x, z] = EP(e, it.ws, it.d / 2 + 0.1); it.x = x; it.z = z; it.rot = norm360(rd(e.rot)); }
 function fit(it, sn) {
   if (it.mt === 'w') {
@@ -1169,7 +1187,8 @@ function rotWidget(o, compact) {
   const cur = h('span', { class: 'rotcur' }); const sync = () => { cur.textContent = '현재 ' + r1(cwOf(o)) + '°'; }; sync(); BIND.push([cur, sync]);
   return h('div', { class: 'rotw' + (compact ? ' cmp' : '') },
     h('div', { class: 'rotq' + (compact ? ' c3' : '') }, compact ? null : q(-15, '⟲ 15°'), q(-45, '⟲ 45°'), q(-90, '⟲ 90°'), q(-180, '⟲ 180°'), compact ? null : q(15, '⟳ 15°'), q(45, '⟳ 45°'), q(90, '⟳ 90°', 'b'), q(180, '⟳ 180°')),
-    h('div', { class: 'rotc' }, inp, h('span', { class: 'u' }, '°'), dir, BTN('적용', go, 'b'), BTN('0°', () => rotTo(0), 'o', '정면(0°)으로'), cur));
+    h('div', { class: 'rotc' }, inp, h('span', { class: 'u' }, '°'), dir, BTN('적용', go, 'b'), BTN('0°', () => rotTo(0), 'o', '정면(0°)으로'), cur),
+    flipRow(o));
 }
 // ---------- 다중 선택 · 그룹 · 일괄 편집 ----------
 // sel = { k: 'multi', list: [가구…], o: 기준 가구 }  (가구·소품·사람)
@@ -1249,7 +1268,7 @@ function distMulti(list, axis, gap) {
 }
 function mirrorMulti(list, axis) {
   if (guardMulti(list)) return; const fl = floorOf(list), [cx, cz] = ucenter(fl);
-  fl.forEach(o => { if (axis === 'x') { o.x = 2 * cx - o.x; o.rot = norm360(-(o.rot || 0)); } else { o.z = 2 * cz - o.z; o.rot = norm360(180 - (o.rot || 0)); } place(o); });
+  fl.forEach(o => { if (axis === 'x') { o.x = 2 * cx - o.x; o.rot = norm360(-(o.rot || 0)); } else { o.z = 2 * cz - o.z; o.rot = norm360(180 - (o.rot || 0)); } o.fx = o.fx ? undefined : 1; place(o); });
   keepInside(list); upd();
 }
 let gidN = 0; const nextGid = () => { gidN = Math.max(gidN, ...items.map(i => i.gid || 0)) + 1; return gidN; };
@@ -1337,8 +1356,8 @@ function multiPanel(b) {
     h('div', { class: 'r' }, BTN('가로 균등 분배', () => distMulti(list, 'x', null), 'c'), BTN('세로 균등 분배', () => distMulti(list, 'z', null), 'c')),
     h('div', { class: 'r mgap' }, h('span', { class: 'sm' }, '간격'), gap, h('span', { class: 'sm' }, 'cm로'), BTN('가로로 나란히', () => distMulti(list, 'x', +gap.value || 0), 'o'), BTN('세로로 나란히', () => distMulti(list, 'z', +gap.value || 0), 'o')),
     h('h4', {}, '반전'),
-    h('div', { class: 'r' }, BTN('⇋ 좌우 반전', () => mirrorMulti(list, 'x'), 'c'), BTN('⇅ 앞뒤 반전', () => mirrorMulti(list, 'z'), 'c')),
-    h('p', { class: 'mu sm' }, '배치(위치·방향)를 거울처럼 뒤집습니다. 가구 모양 자체는 그대로입니다.'),
+    h('div', { class: 'r' }, BTN('⇋ 좌우 반전 (배치+모양)', () => mirrorMulti(list, 'x'), 'c'), BTN('⇵ 앞뒤 반전 (배치+모양)', () => mirrorMulti(list, 'z'), 'c'), BTN('⇅ 상하 반전', () => flipSel('y'), 'c')),
+    h('p', { class: 'mu sm' }, '좌우·앞뒤 반전은 배치(위치·방향)와 가구 모양을 함께 거울처럼 뒤집습니다. 상하 반전은 각 가구를 제자리에서 위아래로 뒤집습니다.'),
     h('h4', {}, '복제'),
     h('div', { class: 'r' }, BTN('복제 (Ctrl+D)', () => dupMulti(list), 'b')),
     h('div', { class: 'r mgap' }, h('span', { class: 'sm' }, '배열 복제'), an, h('span', { class: 'sm' }, '세트 ·'), ax, h('span', { class: 'sm' }, '간격'), ag, h('span', { class: 'sm' }, 'cm'), BTN('만들기', () => dupMulti(list, clamp(+an.value || 1, 1, 30), ax.value, +ag.value || 0), 'o')),
@@ -1629,6 +1648,8 @@ addEventListener('keydown', e => {
   if (k === 'q' || k === 'Q') return rotCW(e.shiftKey ? -15 : -45);
   if (k === 'e' || k === 'E') return rotCW(e.shiftKey ? 15 : 45);
   if (k === 'f' || k === 'F') return focusSel();
+  if (k === 'h' || k === 'H') return flipSel('x');
+  if (k === 'v' || k === 'V') return flipSel('y');
   const st = e.altKey ? 1 : e.shiftKey ? 20 : 5;
   let dx = 0, dz = 0;
   if (k === 'ArrowLeft') dx = -st; else if (k === 'ArrowRight') dx = st; else if (k === 'ArrowUp') dz = -st; else if (k === 'ArrowDown') dz = st;
@@ -1848,7 +1869,7 @@ let unwatchLib = null;
 function watchLib() { if (unwatchLib) unwatchLib(); unwatchLib = Cloud.watchMeta ? Cloud.watchMeta('library', d => { if (d && d.dev !== DEV && applyRemoteLib(d)) toast('☁ 다른 기기에서 바꾼 내 가구·카테고리를 반영했습니다', 3500); }) : null; }
 const uniqLib = (n, except) => { let k = n, i = 2; while (CUSTOM.some(p => p[0] === k && p !== except)) k = `${n} (${i++})`; return k; };
 function newCat(name) { name = (name || '').trim(); if (!name) return null; const ex = LIB.cats.find(c => c.name === name); if (ex) return ex.id; const id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); LIB.cats.push({ id, name }); return id; }
-const EXK = ['body', 'desc', 'refs', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'price', 'memo'];
+const EXK = ['fx', 'fy', 'body', 'desc', 'refs', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'price', 'memo'];
 // 간단한 창 (aiui 의 모달과 같은 모양)
 function mdl(title, body) {
   const bg = h('div', { class: 'mdl' }), box = h('div', { class: 'mdl-box' }), close = () => bg.remove();
@@ -2524,7 +2545,7 @@ $('undo').onclick = undo; $('redo').onclick = redo;
 $('fabAdd').onclick = () => { showTab('add'); setSheet('half'); setTimeout(() => $('q').focus({ preventScroll: true }), 300); };
 $('fabAI').onclick = () => { showTab('ai'); setSheet('half'); };
 $('fabCam').onclick = () => AI.openPhoto('furniture');
-const HINT = 'Shift+클릭: 여러 개 선택 · Shift+빈 곳 드래그: 영역 선택 · Ctrl+A 전체 · Ctrl+G 그룹 · 드래그: 이동 · 빈 곳 드래그: 회전 · 우클릭 드래그: 이동 · 휠: 확대 · 파란 점/주황 화살표: 크기 · R/Shift+R 시계·반시계 90° · Q/E 45° · Del 삭제 · Ctrl+Z 되돌리기 · 더블클릭: 확대';
+const HINT = 'H/V: 좌우·상하 반전 · Shift+클릭: 여러 개 선택 · Shift+빈 곳 드래그: 영역 선택 · Ctrl+A 전체 · Ctrl+G 그룹 · 드래그: 이동 · 빈 곳 드래그: 회전 · 우클릭 드래그: 이동 · 휠: 확대 · 파란 점/주황 화살표: 크기 · R/Shift+R 시계·반시계 90° · Q/E 45° · Del 삭제 · Ctrl+Z 되돌리기 · 더블클릭: 확대';
 $('hint').textContent = HINT;
 document.addEventListener('click', e => { document.querySelectorAll('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
 
@@ -2552,7 +2573,7 @@ function resolveLights(t) {
 }
 function resolveOps(t) { if (Array.isArray(t)) return t.flatMap(resolveOps); const s = String(t || '').replace(/\s/g, ''); return OPS.filter(o => opLabel(o) === s || String(o.id) === s.replace('#', '')); }
 function wallIdx(w) { if (w == null) return undefined; if (typeof w === 'number') return clamp(Math.round(w), 0, E.length - 1); const m = /(\d+)/.exec(String(w)); if (m) return clamp(+m[1] - 1, 0, E.length - 1); const map = { N: 0, E: 1, S: 2, W: 3, 뒷벽: 0, 오른쪽: 1, 앞벽: 2, 왼쪽: 3 }; for (const k in map) if (String(w).includes(k)) return Math.min(map[k], E.length - 1); return undefined; }
-const ITEM_KEYS = ['gid', 'body', 'desc', 'refs', 'refUse', 'face', 'skin', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
+const ITEM_KEYS = ['fx', 'fy', 'gid', 'body', 'desc', 'refs', 'refUse', 'face', 'skin', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
 function applySet(it, set) {
   ITEM_KEYS.forEach(k => { if (set[k] !== undefined && set[k] !== null) it[k] = set[k]; });
   if (set.type && !TYPES[set.type]) it.type = 'box';
@@ -2585,12 +2606,13 @@ function runActions(actions = []) {
       const op = a.op || a.action;
       if (op === 'add') { const { it, pos } = specToItem(a.item || a); placeNew(it, pos); if (it.mt === 'w' && a.item && a.item.wall != null) { it.wall = wallIdx(a.item.wall); it.ws = a.item.ws ?? E[it.wall].len / 2; fit(it, false); } log.push(`➕ ${itemLabel(it)} ${it.name} 추가`); }
       else if (op === 'update' || op === 'move' || op === 'modify') { const ts = resolveItems(a.target ?? a.targets); if (!ts.length) { log.push(`⚠ 대상 '${a.target}' 없음`); continue; } const st0 = a.set || a, unlock = st0.lock === 0 || st0.lock === false, ok = ts.filter(it => !it.lock || unlock), sk = ts.filter(it => !ok.includes(it)); ok.forEach(it => { applySet(it, st0); mk(it); fit(it, false); }); if (ok.length) log.push(`✏️ ${ok.map(itemLabel).join(', ')} 변경`); if (sk.length) log.push(`🔒 ${sk.map(itemLabel).join(', ')} 잠김 — 변경 안 함`); }
-      else if (['group', 'ungroup', 'align', 'distribute', 'mirror', 'rotateGroup', 'moveGroup', 'select'].includes(op)) {
+      else if (['group', 'ungroup', 'align', 'distribute', 'mirror', 'flip', 'rotateGroup', 'moveGroup', 'select'].includes(op)) {
         const ts = resolveItems(a.target ?? a.targets); if (!ts.length) { log.push(`⚠ 대상 '${a.target}' 없음`); continue; }
         if (op === 'group') { const g = nextGid(); ts.forEach(o => { o.gid = g; }); log.push(`⧉ ${ts.length}개를 그룹${g}(으)로 묶음`); }
         else if (op === 'ungroup') { ts.forEach(o => { delete o.gid; }); log.push(`그룹 해제 ${ts.length}개`); }
         else if (op === 'align') { alignMulti(ts, a.how || 'cx'); log.push(`↔ ${ts.length}개 정렬`); }
         else if (op === 'distribute') { distMulti(ts, a.axis === 'z' ? 'z' : 'x', a.gap == null ? null : +a.gap); log.push(`${ts.length}개 간격 정리`); }
+        else if (op === 'flip') { const ax = a.axis === 'y' || a.axis === 'v' ? 'fy' : 'fx'; ts.filter(o => !o.lock).forEach(o => { o[ax] = a.on === false || a.on === 0 ? undefined : a.on ? 1 : o[ax] ? undefined : 1; place(o); }); log.push(`${ax === 'fx' ? '⇋ 좌우' : '⇅ 상하'} 반전 ${ts.length}개`); }
         else if (op === 'mirror') { mirrorMulti(ts, a.axis === 'z' ? 'z' : 'x'); log.push(`${ts.length}개 반전`); }
         else if (op === 'rotateGroup') { rotMulti(ts, -(+a.cw || +a.deg || 90), !!a.each); log.push(`⟳ ${ts.length}개 회전`); }
         else if (op === 'moveGroup') { moveMulti(ts, +a.dx || 0, +a.dz || 0); log.push(`${ts.length}개 이동`); }
@@ -2645,7 +2667,7 @@ function describe() {
     houses: R.kind === 'out' ? (R.houses || []).filter(x => x.g).map(x => ({ room: x._name, w: rd(x._w), d: rd(x._d), h: rd(x._h), x: rd(x.x - BB.x0), z: rd(x.z - BB.z0), rot: x.rot || 0, roof: x.roof || 'flat' })) : undefined,
     unit: 'cm', coord: 'x=왼쪽 외곽에서 가구 중심까지, z=뒤쪽 외곽에서 가구 중심까지, rot=반시계 회전(도, 위에서 볼 때). 시계방향 N° 회전은 drot:-N, 반시계 N°는 drot:N. 벽 번호는 1부터.',
     room: { W: R.W, D: R.D, H: R.H, locked: !!R.lock, shape: isRect(R.pts, R.bul) ? 'rect' : 'custom', area_m2: +(roomArea() / 10000).toFixed(2), floor: { type: R.fl, color: R.flc, dir: R.fld || 0 }, wallColor: R.wc, outsideView: R.view, viewTime: R.vtime, night: !!PREF.night, walls: E.map(e => ({ label: '벽' + (e.i + 1), from: e.a.map(P1), to: e.b.map(P1), len: P1(e.len), curved: !straight(e), color: R.wcs[e.i] || R.wc })) },
-    items: items.map(i => ({ desc: i.desc || (i.type === 'rug' || i.type === 'rugR' ? (i.rugImg ? 'rug with EXACTLY the pattern of its reference photo' : rugDesc(i)) : undefined), body: i.body, refs: (i.refs || []).length || undefined, label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
+    items: items.map(i => ({ flip: [i.fx && 'mirrored left-right', i.fy && 'upside down'].filter(Boolean).join(', ') || undefined, desc: i.desc || (i.type === 'rug' || i.type === 'rugR' ? (i.rugImg ? 'rug with EXACTLY the pattern of its reference photo' : rugDesc(i)) : undefined), body: i.body, refs: (i.refs || []).length || undefined, label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
     lights: LIGHTS.map(l => ({ label: lightLabel(l), kind: l.kind, kindName: (LKIND[l.kind] || {}).n, x: l.x != null && !lightIsWall(l) ? P1(l.x - BB.x0) : undefined, z: l.z != null && !lightIsWall(l) ? P1(l.z - BB.z0) : undefined, wall: lightIsWall(l) ? '벽' + (l.wall + 1) : undefined, on: l.on !== false, lum: l.lum ?? 1, temp: l.temp, lock: l.lock ? true : undefined })),
     openings: OPS.map(o => ({ label: opLabel(o), kind: o.kind, st: o.st, stName: (o.kind === 'win' ? WIN_ST : DOOR_ST).find(s => s[0] === o.st)?.[1], wall: '벽' + (o.wall + 1), s: P1(o.s), w: o.w, h: o.h, y: o.y, open: o.st === 'jung3' ? o.open || 0 : o.kind === 'win' ? o.wo || 0 : o.ang || 0, curtain: o.cur, lock: o.lock ? true : undefined })),
   };
