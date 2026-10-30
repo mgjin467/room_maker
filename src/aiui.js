@@ -93,7 +93,7 @@ actions 종류:
 - 여러 개 일괄: {"op":"group","target":["의자1","의자2","식탁1"]} (그룹 묶기) · {"op":"ungroup","target":[...]}
 - {"op":"align","target":[...],"how":"l|cx|r|b|cz|f|floor|roomC"} (왼쪽/가로가운데/오른쪽/뒤/세로가운데/앞 맞춤, 바닥으로, 묶음을 방 가운데로)
 - {"op":"distribute","target":[...],"axis":"x|z","gap":30} (gap 생략 시 균등 분배, 숫자면 그 간격 cm로 나란히)
-- {"op":"mirror","target":[...],"axis":"x|z"} (여러 개 배치를 거울상으로) · {"op":"flip","target":"소파1","axis":"x|y"} (x=좌우 반전, y=상하 반전; 같은 명령 다시 = 해제, "on":true/false로 지정 가능) · {"op":"rotateGroup","target":[...],"cw":90} (묶음 가운데 기준 시계방향 회전) · {"op":"moveGroup","target":[...],"dx":50,"dz":0} (간격 유지한 채 평행 이동)
+- {"op":"mirror","target":[...],"axis":"x|z"} (여러 개 배치를 거울상으로) · {"op":"flip","target":"소파1","axis":"x|y|z"} (x=좌우 반전, y=상하 반전, z=앞뒤 반전; 같은 명령 다시 = 해제, "on":true/false로 지정 가능) · {"op":"rotateGroup","target":[...],"cw":90} (묶음 가운데 기준 시계방향 회전) · {"op":"moveGroup","target":[...],"dx":50,"dz":0} (간격 유지한 채 평행 이동)
 - {"op":"select","target":[...]} (사용자 화면에서 그 가구들을 선택 상태로)
 - {"op":"light","targets":["조명1","조명2"] 또는 "all"(전체 조명=천장·벽 조명과 스탠드 모두),"set":{"on":true/false,"lum":0~2.5(0=완전 어둡게, 1=기본),"temp":2700~6500}}
 - {"op":"addLight","light":{"kind":"down|spot|panel|round|pendant|pendantG|pendantL|chand|rail|fan|wall|strip","x":,"z":,"wall":"벽1","s":,"y":,"temp":,"lum":}} / {"op":"deleteLight","targets":[...]}
