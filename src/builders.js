@@ -658,9 +658,12 @@ function buildPerson(it) {
   });
   // 목·머리 (고개 회전)
   C(0, shY - 1, 0, H * 0.026, H * 0.028, H * 0.045, SK, { seg: 12 });
+  // 고개: 좌우(yaw) + 상하(pitch: +는 들기, -는 숙이기). 목 위쪽을 축으로 머리·머리카락·안경을 함께 돌림
   const yaw = v('yaw') * PI / 180, cyw = Math.cos(yaw), syw = Math.sin(yaw), HP = (x, z) => [x * cyw + z * syw, -x * syw + z * cyw];
-  const Sh = (x, y, z, r, c, o = {}) => { const [px, pz2] = HP(x, z); S(px, y, pz2, r, c, { ...o, ry: (o.ry || 0) + yaw }); };
-  const Bh = (x, y, z, w2, hh, d2, c, o = {}) => { const [px, pz2] = HP(x, z); B(px, y, pz2, w2, hh, d2, c, { ...o, ry: (o.ry || 0) + yaw }); };
+  const pit = Math.max(-50, Math.min(50, v('pitch'))) * PI / 180, cpt = Math.cos(pit), spt = Math.sin(pit), pvY = topY - hr * 2.05;
+  const HP3 = (x, y, z) => { const y1 = pvY + (y - pvY) * cpt + z * spt, z1 = -(y - pvY) * spt + z * cpt, [px, pz2] = HP(x, z1); return [px, y1, pz2]; };
+  const Sh = (x, y, z, r, c, o = {}) => { const [px, py, pz2] = HP3(x, y, z); S(px, py, pz2, r, c, { ...o, rx: (o.rx || 0) - pit, ry: (o.ry || 0) + yaw, ro: 'YXZ' }); };
+  const Bh = (x, y, z, w2, hh, d2, c, o = {}) => { const [px, py, pz2] = HP3(x, y + hh / 2, z); B(px, py - hh / 2, pz2, w2, hh, d2, c, { ...o, rx: (o.rx || 0) - pit, ry: (o.ry || 0) + yaw, ro: 'YXZ' }); };
   const hy = topY - hr * 1.1, face = !!it.face, fsz = Math.max(0.5, Math.min(1.45, it.fsz || 1)), phlF = 1.9 * fsz, tlF = 1.9 * fsz;
   Sh(0, hy, 0, hr * 0.92, SK, { sy: 1.15, ws: 22, hs: 16 });
   [-1, 1].forEach(k => Sh(k * hr * 0.9, hy - hr * 0.05, -hr * 0.05, hr * 0.17, SK, { sx: 0.5 }));
@@ -677,12 +680,12 @@ function buildPerson(it) {
     if (hs === 'bob') { [-1, 1].forEach(k => Bh(k * hr * 0.84, hy - hr * 0.85, -hr * 0.3, hr * 0.3, hr * 1.3, hr * 1.0, HRc)); Bh(0, hy - hr * 0.85, -hr * 0.78, hr * 1.9, hr * 1.4, hr * 0.42, HRc); }
     if (hs === 'long') { Bh(0, shY - H * 0.09, -hr * 0.62, hr * 1.75, hy - shY + H * 0.09, hr * 0.6, HRc); [-1, 1].forEach(k => Bh(k * hr * 0.82, hy - hr * 1.6, -hr * 0.2, hr * 0.28, hr * 1.7, hr * 0.7, HRc)); }
     if (hs === 'wavy') for (let i = 0; i < 7; i++) [-1, 0, 1].forEach(k => Sh(k * hr * 0.62, hy - i * hr * 0.42, -hr * 0.62 + (k ? hr * 0.28 : 0), hr * 0.36, HRc));
-    if (hs === 'pony') { const [x0, z0] = HP(0, -hr * 1.0), [x1, z1] = HP(0, -hr * 1.3); Stick(x0, hy + hr * 0.2, z0, x1, hy - hr * 2.2, z1, hr * 0.24, hr * 0.12, HRc); Sh(0, hy + hr * 0.25, -hr * 0.97, hr * 0.17, HRc); }
+    if (hs === 'pony') { const [x0, y0, z0] = HP3(0, hy + hr * 0.2, -hr * 1.0), [x1, y1, z1] = HP3(0, hy - hr * 2.2, -hr * 1.3); Stick(x0, y0, z0, x1, y1, z1, hr * 0.24, hr * 0.12, HRc); Sh(0, hy + hr * 0.25, -hr * 0.97, hr * 0.17, HRc); }
     if (hs === 'bun') Sh(0, hy + hr * 0.6, -hr * 0.78, hr * 0.45, HRc);
     if (hs === 'lowbun') Sh(0, hy - hr * 0.3, -hr * 1.02, hr * 0.42, HRc);
     if (hs === 'curly') for (let i = 0; i < 22; i++) { const th = 0.2 + (i % 4) * 0.33, ph = i * 2.4; const x = Math.sin(th) * Math.cos(ph), z = Math.sin(th) * Math.sin(ph); if (face && z > 0.35 && th > 0.4) continue; Sh(x * R0, hcY + Math.cos(th) * R0 * 1.05, hcZ + z * R0, hr * 0.27, HRc); }
   }
-  if (it.glasses) { const gz = hr * 0.92 * 0.97, gy = hy + hr * 0.1, gr2 = hr * 0.2, gc = it.glassC || 0x2b2b2d; [-1, 1].forEach(k => { const [px, pz2] = HP(k * hr * 0.33, gz); T(px, gy, pz2, gr2, Math.max(0.15, hr * 0.03), gc, { ts: 20, ry: yaw }); }); Bh(0, gy - hr * 0.02, gz, hr * 0.26, hr * 0.04, hr * 0.04, gc); }
+  if (it.glasses) { const gz = hr * 0.92 * 0.97, gy = hy + hr * 0.1, gr2 = hr * 0.2, gc = it.glassC || 0x2b2b2d; [-1, 1].forEach(k => { const [px, py, pz2] = HP3(k * hr * 0.33, gy, gz); T(px, py, pz2, gr2, Math.max(0.15, hr * 0.03), gc, { ts: 20, rx: -pit, ry: yaw, ro: 'YXZ' }); }); Bh(0, gy - hr * 0.02, gz, hr * 0.26, hr * 0.04, hr * 0.04, gc); }
   if (it.veil) { const [vx, vz] = HP(0, -hr * 1.4); C(vx, sit ? hipY : H * 0.2, vz, hr * 0.6, H * 0.2, hy - (sit ? hipY : H * 0.2), 0xffffff, { op: 0.35, seg: 20 }); }
   if (it.flower && of !== 'gown' && of !== 'mermaid') S(-sw * 0.5, shY - H * 0.09, zf + 0.6, H * 0.017, 0xffffff, { ws: 10, hs: 8 });
   if (it.bouquet) {

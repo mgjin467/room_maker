@@ -698,7 +698,7 @@ function mk(it) {
     else geo2 = new THREE.BoxGeometry(Math.max(0.05, p.w), Math.max(0.05, p.h), Math.max(0.05, p.d));
     const q = new THREE.Mesh(geo2, mt); if (p.tex === 'face') q.userData.faceTex = 1;
     if (p.g === 'b' || p.g === 'c') q.position.set(p.x, p.y + p.h / 2, p.z); else q.position.set(p.x, p.y, p.z);
-    q.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0); q.scale.set(p.sx || 1, p.sy || 1, p.sz || 1);
+    if (p.ro) q.rotation.order = p.ro; q.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0); q.scale.set(p.sx || 1, p.sy || 1, p.sz || 1);
     q.userData.it = it; m.add(q);
   });
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(fw, it.h, it.d)), new THREE.LineBasicMaterial({ color: 0x2f6fed, depthTest: false, transparent: true }));
@@ -1871,7 +1871,7 @@ let unwatchLib = null;
 function watchLib() { if (unwatchLib) unwatchLib(); unwatchLib = Cloud.watchMeta ? Cloud.watchMeta('library', d => { if (d && d.dev !== DEV && applyRemoteLib(d)) toast('☁ 다른 기기에서 바꾼 내 가구·카테고리를 반영했습니다', 3500); }) : null; }
 const uniqLib = (n, except) => { let k = n, i = 2; while (CUSTOM.some(p => p[0] === k && p !== except)) k = `${n} (${i++})`; return k; };
 function newCat(name) { name = (name || '').trim(); if (!name) return null; const ex = LIB.cats.find(c => c.name === name); if (ex) return ex.id; const id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); LIB.cats.push({ id, name }); return id; }
-const EXK = ['fx', 'fy', 'fz', 'body', 'desc', 'refs', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'price', 'memo'];
+const EXK = ['fx', 'fy', 'fz', 'pitch', 'body', 'desc', 'refs', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'c2', 'mt', 'y', 'n', 'pv', 'sk', 'lt', 'nc', 'lg', 'cols', 'leg', 'sink', 'hb', 'temp', 'mat', 'mat2', 'cpat', 'sex', 'outfit', 'skin', 'hair', 'shoe', 'hs', 'pose', 'veil', 'face', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'price', 'memo'];
 // 간단한 창 (aiui 의 모달과 같은 모양)
 function mdl(title, body) {
   const bg = h('div', { class: 'mdl' }), box = h('div', { class: 'mdl-box' }), close = () => bg.remove();
@@ -2153,7 +2153,7 @@ function personEditor(it, C2) {
     h('div', { class: 'ch' }, Object.entries(POSES).map(([k, [n, vals]]) => BTN(n, () => { Object.assign(it, vals); it.pose = k; C2(); renderSel(); }, 'c' + (it.pose === k ? ' on' : '')))),
     G(3, psl('왼팔 들기', 'aL', -60, 180, 1, deg), psl('왼팔 방향 (앞↔옆)', 'zL', 0, 100, 1, deg), psl('왼팔꿈치', 'eL', 0, 150, 1, deg)),
     G(3, psl('오른팔 들기', 'aR', -60, 180, 1, deg), psl('오른팔 방향 (앞↔옆)', 'zR', 0, 100, 1, deg), psl('오른팔꿈치', 'eR', 0, 150, 1, deg)),
-    G(3, psl('걷기 보폭', 'leg', -1, 1, 0.05, v => Math.round(v * 100) + ''), psl('고개 좌우', 'yaw', -70, 70, 1, deg), F('앉기', h('div', { class: 'cg' }, bchk('앉은 자세', () => it.sit ?? (POSES[it.pose] || POSES.stand)[1].sit, v => { it.sit = v ? 1 : 0; C2(); })))),
+    G(3, psl('걷기 보폭', 'leg', -1, 1, 0.05, v => Math.round(v * 100) + ''), psl('고개 좌우', 'yaw', -70, 70, 1, deg), psl('고개 상하 (숙이기↔들기)', 'pitch', -45, 45, 1, deg), F('앉기', h('div', { class: 'cg' }, bchk('앉은 자세', () => it.sit ?? (POSES[it.pose] || POSES.stand)[1].sit, v => { it.sit = v ? 1 : 0; C2(); })))),
     h('p', { class: 'mu sm' }, '왼쪽·오른쪽은 사람 본인 기준입니다. 슬라이더를 끌면 3D에서 바로 바뀝니다.'));
 }
 function saveCustom(it, name, def) { return saveLibDialog([{ it, name: name || it.name }], def); }
@@ -2543,7 +2543,8 @@ function closeMenus() { document.querySelectorAll('details.menu[open]').forEach(
 function setMode(m) { mode = m; mzTemp = null; $('mz').classList.toggle('on', m === 'measure'); cv.style.cursor = m === 'measure' ? 'crosshair' : 'default'; $('hint').textContent = m === 'measure' ? '줄자: 바닥의 두 점을 차례로 누르세요 · Esc 종료' : HINT; if (m === 'measure') toast('줄자: 바닥의 두 점을 차례로 누르세요'); dims(); }
 $('mz').onclick = () => { setMode(mode === 'measure' ? null : 'measure'); closeMenus(); };
 $('night').onclick = () => { setNight(PREF.night ? 0 : 1); closeMenus(); };
-$('shot').onclick = () => { saveFile(fname('3D.png'), shot3D(), 'image/png'); closeMenus(); };
+$('galB').onclick = () => { closeMenus(); AI.openGallery(); };
+$('shot').onclick = () => { const u = shot3D(); saveFile(fname('3D.png'), u, 'image/png'); AI.autoGallery(u, { name: '3D 캡처', project: projName, style: 'capture' }); closeMenus(); };
 $('undo').onclick = undo; $('redo').onclick = redo;
 $('fabAdd').onclick = () => { showTab('add'); setSheet('half'); setTimeout(() => $('q').focus({ preventScroll: true }), 300); };
 $('fabAI').onclick = () => { showTab('ai'); setSheet('half'); };
@@ -2576,7 +2577,7 @@ function resolveLights(t) {
 }
 function resolveOps(t) { if (Array.isArray(t)) return t.flatMap(resolveOps); const s = String(t || '').replace(/\s/g, ''); return OPS.filter(o => opLabel(o) === s || String(o.id) === s.replace('#', '')); }
 function wallIdx(w) { if (w == null) return undefined; if (typeof w === 'number') return clamp(Math.round(w), 0, E.length - 1); const m = /(\d+)/.exec(String(w)); if (m) return clamp(+m[1] - 1, 0, E.length - 1); const map = { N: 0, E: 1, S: 2, W: 3, 뒷벽: 0, 오른쪽: 1, 앞벽: 2, 왼쪽: 3 }; for (const k in map) if (String(w).includes(k)) return Math.min(map[k], E.length - 1); return undefined; }
-const ITEM_KEYS = ['fx', 'fy', 'fz', 'gid', 'body', 'desc', 'refs', 'refUse', 'face', 'skin', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
+const ITEM_KEYS = ['fx', 'fy', 'fz', 'pitch', 'gid', 'body', 'desc', 'refs', 'refUse', 'face', 'skin', 'rp', 'rs', 'rpsc', 'rugImg', 'rugFit', 'name', 'type', 'w', 'd', 'h', 'color', 'c2', 'mat', 'mat2', 'x', 'z', 'y', 'rot', 'mt', 'n', 'cpat', 'pv', 'lock', 'price', 'memo', 'sex', 'outfit', 'skin', 'hair', 'hs', 'shoe', 'pose', 'veil', 'on', 'lum', 'temp', 'fold', 'nc', 'sk', 'wall', 'ws', 'glasses', 'flower', 'bouquet', 'tie', 'glassC', 'c3', 'sleeve', 'tieT', 'skirtL', 'shw', 'build', 'headS', 'fsz', 'fzoom', 'fox', 'foy', 'hv', 'bangs', 'aL', 'aR', 'zL', 'zR', 'eL', 'eR', 'yaw', 'sit', 'face', 'leg'];
 function applySet(it, set) {
   ITEM_KEYS.forEach(k => { if (set[k] !== undefined && set[k] !== null) it[k] = set[k]; });
   if (set.type && !TYPES[set.type]) it.type = 'box';
@@ -2670,7 +2671,7 @@ function describe() {
     houses: R.kind === 'out' ? (R.houses || []).filter(x => x.g).map(x => ({ room: x._name, w: rd(x._w), d: rd(x._d), h: rd(x._h), x: rd(x.x - BB.x0), z: rd(x.z - BB.z0), rot: x.rot || 0, roof: x.roof || 'flat' })) : undefined,
     unit: 'cm', coord: 'x=왼쪽 외곽에서 가구 중심까지, z=뒤쪽 외곽에서 가구 중심까지, rot=반시계 회전(도, 위에서 볼 때). 시계방향 N° 회전은 drot:-N, 반시계 N°는 drot:N. 벽 번호는 1부터.',
     room: { W: R.W, D: R.D, H: R.H, locked: !!R.lock, shape: isRect(R.pts, R.bul) ? 'rect' : 'custom', area_m2: +(roomArea() / 10000).toFixed(2), floor: { type: R.fl, color: R.flc, dir: R.fld || 0 }, wallColor: R.wc, outsideView: R.view, viewTime: R.vtime, night: !!PREF.night, walls: E.map(e => ({ label: '벽' + (e.i + 1), from: e.a.map(P1), to: e.b.map(P1), len: P1(e.len), curved: !straight(e), color: R.wcs[e.i] || R.wc })) },
-    items: items.map(i => ({ flip: [i.fx && 'mirrored left-right', i.fy && 'upside down', i.fz && 'mirrored front-to-back'].filter(Boolean).join(', ') || undefined, desc: i.desc || (i.type === 'rug' || i.type === 'rugR' ? (i.rugImg ? 'rug with EXACTLY the pattern of its reference photo' : rugDesc(i)) : undefined), body: i.body, refs: (i.refs || []).length || undefined, label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
+    items: items.map(i => ({ flip: [i.fx && 'mirrored left-right', i.fy && 'upside down', i.fz && 'mirrored front-to-back'].filter(Boolean).join(', ') || undefined, desc: i.desc || (i.type === 'rug' || i.type === 'rugR' ? (i.rugImg ? 'rug with EXACTLY the pattern of its reference photo' : rugDesc(i)) : undefined), body: i.body, refs: (i.refs || []).length || undefined, label: itemLabel(i), id: i.id, name: i.name, type: i.type, w: i.w, d: i.d, h: i.h, x: P1(i.x - BB.x0), z: P1(i.z - BB.z0), y: P1(i.y || 0), rot: i.rot || 0, color: i.color, c2: i.c2, mat: i.mat || '', mat2: i.mat2 || '', mt: i.mt || 'f', wall: i.mt === 'w' ? '벽' + ((i.wall ?? 0) + 1) : undefined, n: i.n, cpat: COLSTY[i.type] ? colPat(i, fpw(i)) : undefined, pv: i.pv, lock: i.lock ? true : undefined, sex: i.sex, outfit: i.outfit, pose: i.type === 'person' ? i.pose : undefined, yaw: i.type === 'person' && i.yaw ? i.yaw : undefined, pitch: i.type === 'person' && i.pitch ? i.pitch : undefined, on: LAMPS.has(i.type) ? i.on !== false : undefined, lum: LAMPS.has(i.type) ? (i.lum ?? 0.8) : undefined, warn: [i.ov && '겹침', i.wb && '창문가림', i.db && '문간섭', i.out && '방밖'].filter(Boolean).join(',') || undefined })),
     lights: LIGHTS.map(l => ({ label: lightLabel(l), kind: l.kind, kindName: (LKIND[l.kind] || {}).n, x: l.x != null && !lightIsWall(l) ? P1(l.x - BB.x0) : undefined, z: l.z != null && !lightIsWall(l) ? P1(l.z - BB.z0) : undefined, wall: lightIsWall(l) ? '벽' + (l.wall + 1) : undefined, on: l.on !== false, lum: l.lum ?? 1, temp: l.temp, lock: l.lock ? true : undefined })),
     openings: OPS.map(o => ({ label: opLabel(o), kind: o.kind, st: o.st, stName: (o.kind === 'win' ? WIN_ST : DOOR_ST).find(s => s[0] === o.st)?.[1], wall: '벽' + (o.wall + 1), s: P1(o.s), w: o.w, h: o.h, y: o.y, open: o.st === 'jung3' ? o.open || 0 : o.kind === 'win' ? o.wo || 0 : o.ang || 0, curtain: o.cur, lock: o.lock ? true : undefined })),
   };

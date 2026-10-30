@@ -376,3 +376,4 @@ body.mob.kb .mdl-box{max-height:calc(var(--vvh,100vh) - 16px)}
 body.mob.kb #kbv{display:flex;position:fixed;left:8px;right:8px;top:calc(var(--vvt,0px) + 6px);z-index:190;align-items:baseline;gap:8px;background:rgba(20,22,28,.92);color:#fff;border-radius:12px;padding:8px 12px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none}
 #kbv small{opacity:.7;font-size:12px;flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#kbv b{font-size:20px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
 body.mob.kb .mdl ~ #kbv,body.mob.kb.kbm #kbv{display:none}
+.galbar{justify-content:space-between;align-items:center;margin-bottom:4px}

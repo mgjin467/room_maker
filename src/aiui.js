@@ -5,6 +5,7 @@ import qrcode from 'qrcode-generator';
 import { cropFace, centerBox, sampleSkin } from './faces.js';
 import { getRef, putRef, REF_KINDS, REF_EN } from './refs.js';
 import { viewImg } from './viewer.js';
+import { listLocal, putLocal, delLocal, markLocal } from './gallery.js';
 
 const K_KEYS = 'room3d.v2.aikeys', K_MODELS = 'room3d.v2.aimodels', K_EXTRA = 'room3d.v2.aiextra', K_CHAT = 'room3d.v2.chat';
 const ASPECTS = [['1:1', 1], ['2:3', 2 / 3], ['3:2', 1.5], ['3:4', 0.75], ['4:3', 4 / 3], ['4:5', 0.8], ['5:4', 1.25], ['9:16', 9 / 16], ['16:9', 16 / 9], ['21:9', 21 / 9]];
@@ -103,7 +104,7 @@ actions 종류:
 모델키(type): ${typeList()}
 재질키(mat): ${A.MATS.map(m => m[0] || '""').join(', ')}
 열 패턴(cpat, 열마다 한 글자): \n${colList()}
-사람(person): sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, hs(머리) ${A.HAIRS.map(o => o[0]).join('|')}, bangs 앞머리 1/0, hair/skin/shoe/tie/c3 #hex, color=상의 c2=하의, sleeve long|short|none, tieT none|tie|bow, skirtL 0.3~1, pose ${Object.keys(A.POSES).join('|')} 또는 각도 aL/aR(팔 들기 -60~180) zL/zR(0앞~90옆) eL/eR(팔꿈치 0~150) leg(보폭 -1~1) yaw(고개 -70~70) sit 1/0, 체형 shw/build/headS(0.8~1.4), 얼굴사진 크기 fsz(0.5~1.45) fzoom(0.5~2.5) fox/foy(-0.4~0.4), glasses/flower/bouquet/veil 1/0. 기본 키 남180 여165 어린이120. 왼쪽/오른쪽 팔은 사람 본인 기준(L=본인 왼쪽).
+사람(person): sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, hs(머리) ${A.HAIRS.map(o => o[0]).join('|')}, bangs 앞머리 1/0, hair/skin/shoe/tie/c3 #hex, color=상의 c2=하의, sleeve long|short|none, tieT none|tie|bow, skirtL 0.3~1, pose ${Object.keys(A.POSES).join('|')} 또는 각도 aL/aR(팔 들기 -60~180) zL/zR(0앞~90옆) eL/eR(팔꿈치 0~150) leg(보폭 -1~1) yaw(고개 좌우 -70~70) pitch(고개 상하: +들기 -숙이기, -45~45) sit 1/0, 체형 shw/build/headS(0.8~1.4), 얼굴사진 크기 fsz(0.5~1.45) fzoom(0.5~2.5) fox/foy(-0.4~0.4), glasses/flower/bouquet/veil 1/0. 기본 키 남180 여165 어린이120. 왼쪽/오른쪽 팔은 사람 본인 기준(L=본인 왼쪽).
 카탈로그(preset 이름으로 쓰면 크기·모양이 자동 적용):\n${catalogNames()}
 공간: 한 프로젝트에 여러 공간(방·야외)이 있습니다(상태의 space/spaces). 새 공간: {"op":"addSpace","kind":"room|outdoor","name":"","W":,"D":,"H":,"env":"${['field','mountain','forest','gravel','beach','lake','valley','sand','snow','garden','plaza','rooftop','deckyard','farm'].join('|')}"} · 이동: {"op":"switchSpace","name":"공간 이름"} · 모든 공간 함께 보기(야외 배경 위에 방들 배치): {"op":"overview"} · 야외 환경 변경: {"op":"room","set":{"env":"beach","gk":"grass|moss|gravel|sand|dune|snow|pavers|stone|concrete|deck|farm|soil","gc":"#hex","vtime":"day|cloudy|dawn|sunset|night"}}. 야외에는 창문·문이 없고 나무(tree, pv broad|pine|palm|birch|cherry|maple|cypress)·바위·파라솔·텐트·아치 등 야외·조경 카탈로그를 씁니다. 사람 체형 body: std|slim|muscle|curvy|plump|petite.
 잠금: 상태에서 lock:true 인 가구·창호·조명과 room.locked 인 방은 위치·크기·모양을 바꾸거나 삭제하지 마세요(조명 켜기·밝기·색온도, 문·창 열고 닫기, 커튼은 가능). 사용자가 잠금/고정을 요청하면 set에 "lock":1, 해제는 "lock":0 (방은 room set의 "lock").
@@ -366,7 +367,7 @@ JSON 하나만:
   const personEN = (i, plain) => {
     const rf = (!plain && REFCTX && REFCTX.get(i.id)) || [], nOf = ks => rf.filter(r => ks.includes(r.kind)).map(r => '#' + r.n), cl = nOf(['outfit', 'look']), fc = nOf(['face', 'facehair', 'look', 'hair']);
     const wear = cl.length ? `wearing EXACTLY the outfit from reference image ${cl.join('/')} (ignore the 3D clothing colors)` : `wearing ${OUTFIT_EN[i.outfit] || 'everyday clothes'} (clothing colors ${[i.color, i.c2].filter(Boolean).join(' and ')}, with shoes)`;
-    return `a ${sexEN(i)} about ${i.h}cm tall ${wear}${fc.length ? `, with exactly the face and hairstyle of the person in reference image ${fc.join('/')}` : ''}${!plain && BUILD_EN[i.body] ? ', ' + BUILD_EN[i.body] : ''}${(POSE_EN[i.pose] ? ', ' + POSE_EN[i.pose] : '')}`;
+    return `a ${sexEN(i)} about ${i.h}cm tall ${wear}${fc.length ? `, with exactly the face and hairstyle of the person in reference image ${fc.join('/')}` : ''}${!plain && BUILD_EN[i.body] ? ', ' + BUILD_EN[i.body] : ''}${(POSE_EN[i.pose] ? ', ' + POSE_EN[i.pose] : '')}${Math.abs(i.pitch || 0) >= 8 ? `, head tilted ${i.pitch > 0 ? 'up' : 'down'} about ${Math.abs(Math.round(i.pitch))}°` : ''}${Math.abs(i.yaw || 0) >= 10 ? `, head turned to their ${i.yaw > 0 ? 'left' : 'right'} about ${Math.abs(Math.round(i.yaw))}°` : ''}`;
   };
   const POSE_EN = { sit: 'seated', sitW: 'seated, waving', walk: 'walking', wave: 'waving', cross: 'arms crossed', hips: 'hands on hips', point: 'pointing', cheer: 'arms raised', hold: 'hands together' };
   function renderPrompt(viewKey, o) {
@@ -590,26 +591,48 @@ ${sceneText(viewKey)}`;
     };
     const showResult = (card, url, cap, name, W, H, info) => {
       const sent = card._sent; card.innerHTML = '';
+      const gp = autoGallery(url, { name, project: A.projName, size: `${W}x${H}`, style: st.ai ? st.style : 'capture' });
       const img = h('img', { src: url, alt: name, onclick: () => viewImg(img.src, name) });
       const file = A.fname(`${name}_${W}x${H}.png`.replace(/\s|·/g, ''));
       app(card, img, h('small', {}, `${name} · ${W}×${H}`), info ? h('small', { class: info.startsWith('⚠') ? 'warn' : 'okc' }, info) : null,
         h('div', { class: 'r' }, BTN('저장·공유', () => A.saveFile(file, url, 'image/png', { preview: A.isMobile() }), 'c'),
           sent ? BTN('보낸 사진·지시문', () => modal('AI에 보낸 내용', h('div', {}, h('p', { class: 'mu sm' }, '번호는 지시문의 image #번호와 같습니다. #1 = 3D 화면, 구조 고정이 켜져 있으면 #2 = 구조 가이드.'), h('div', { class: 'sentg' }, sent.imgs.map((u, k) => h('figure', {}, h('img', { src: u, onclick: () => viewImg(u, '#' + (k + 1)) }), h('figcaption', {}, '#' + (k + 1))))), h('pre', { class: 'pre' }, sent.prompt || '')), { wide: true }), 'c') : null,
           st.ai ? BTN('3D 원본', () => { img.src = img.src === url ? cap : url; }, 'c') : null,
-          BTN('☁ 갤러리', async e => { if (!Cloud.user) return toast('클라우드 갤러리는 로그인 후 사용할 수 있습니다'); e.target.disabled = true; try { await Cloud.saveGallery('g' + Date.now().toString(36), await toGalleryDoc(url, { name, project: A.projName, size: `${W}x${H}`, style: st.style })); toast('갤러리에 저장했습니다'); } catch (err) { toast(err.message); } e.target.disabled = false; }, 'c')));
+          BTN('🖼 갤러리', e => { gp.then(d => { e.target.textContent = d ? (d.cloud ? '🖼 갤러리 (☁ 저장됨)' : '🖼 갤러리 (이 기기)') : '🖼 갤러리'; }); openGallery(); }, 'c')));
     };
     draw(); modal('🎨 실사 이미지 · 고화질 캡처', body, { wide: true });
     if (pre.views && pre.auto !== false && pre.op === 'render') setTimeout(go, 300);
   }
-  async function openGallery() {
-    if (!Cloud.user) return toast('갤러리는 클라우드 로그인 후 사용할 수 있습니다 (저장·출력 탭)');
-    const body = h('div', { class: 'rgrid' }, h('p', { class: 'mu' }, '불러오는 중…')); modal('🖼 갤러리 (클라우드)', body, { wide: true });
+  // 갤러리: 이 기기에 자동 보관된 이미지 + 클라우드 갤러리 (같은 id는 하나로)
+  async function autoGallery(url, meta) {
     try {
-      const ls = await Cloud.listGallery(); body.innerHTML = '';
-      if (!ls.length) body.append(h('p', { class: 'mu' }, '저장된 이미지가 없습니다.'));
-      ls.forEach(g => body.append(h('div', { class: 'rcard' }, h('img', { src: g.img, onclick: () => viewImg(g.img, g.name || '') }), h('small', {}, `${g.project || ''} · ${g.name || ''} · ${new Date(g.t).toLocaleString('ko-KR')}`),
-        h('div', { class: 'r' }, BTN('저장·공유', () => A.saveFile(`${g.project || 'room'}_${g.name || 'render'}.jpg`, g.img, 'image/jpeg', { preview: A.isMobile() }), 'c'), BTN('삭제', async e => { if (!confirm('삭제할까요?')) return; await Cloud.delGallery(g.id); e.target.closest('.rcard').remove(); }, 'c')))));
-    } catch (e) { body.innerHTML = ''; body.append(h('p', { class: 'warn' }, e.message)); }
+      const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), d = { id, ...(await toGalleryDoc(url, meta)) };
+      await putLocal(d);
+      if (Cloud.user) { try { const { id: _i, cloud: _c, ...doc } = d; await Cloud.saveGallery(id, doc); await markLocal(id, { cloud: 1 }); d.cloud = 1; } catch (e) { console.warn('cloud gallery', e); } }
+      return d;
+    } catch (e) { console.warn('gallery', e); return null; }
+  }
+  async function openGallery() {
+    const body = h('div', {}), grid = h('div', { class: 'rgrid' }, h('p', { class: 'mu' }, '불러오는 중…'));
+    let filter = 'all';
+    const m = modal('🖼 갤러리', app(body, h('div', { class: 'r galbar' },
+      h('div', { class: 'seg' }, ...[['all', '전체'], ['proj', '이 프로젝트']].map(([k, n]) => h('button', { class: k === filter ? 'on' : '', onclick: e => { filter = k; e.target.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.target)); paint(); } }, n))),
+      BTN('🎨 새 실사 이미지', () => { m.close(); openRender(); }, 'c')),
+      h('p', { class: 'mu sm' }, Cloud.user ? '실사 이미지·캡처를 만들 때마다 이 기기와 클라우드에 자동 보관됩니다. 다른 기기에서도 같은 계정으로 보입니다.' : '실사 이미지·캡처를 만들 때마다 이 기기에 자동 보관됩니다. 로그인하면 클라우드에도 저장돼 다른 기기에서 볼 수 있습니다.'), grid) || body, { wide: true });
+    let all = [];
+    const paint = () => {
+      grid.innerHTML = ''; const ls = filter === 'proj' ? all.filter(g => (g.project || '') === (A.projName || '')) : all;
+      if (!ls.length) return grid.append(h('p', { class: 'mu' }, all.length ? '이 프로젝트에서 만든 이미지가 없습니다.' : '아직 이미지가 없습니다. 「🎨 새 실사 이미지」나 📷 캡처로 만들어 보세요.'));
+      ls.forEach(g => grid.append(h('div', { class: 'rcard' }, h('img', { src: g.img, loading: 'lazy', onclick: () => viewImg(g.img, `${g.project || ''} · ${g.name || ''}`) }),
+        h('small', {}, `${g.project || ''} · ${g.name || ''} · ${new Date(g.t).toLocaleString('ko-KR')}`), h('small', { class: 'mu' }, [g.local && '📱 이 기기', g.cloud && '☁ 클라우드'].filter(Boolean).join(' · ')),
+        h('div', { class: 'r' }, BTN('저장·공유', () => A.saveFile(`${g.project || 'room'}_${g.name || 'render'}.jpg`.replace(/\s|·/g, ''), g.img, 'image/jpeg', { preview: A.isMobile() }), 'c'),
+          !g.cloud && Cloud.user ? BTN('☁ 올리기', async e => { e.target.disabled = true; try { const { id, local, cloud, ...doc } = g; await Cloud.saveGallery(g.id, doc); await markLocal(g.id, { cloud: 1 }); g.cloud = 1; toast('☁ 클라우드 갤러리에 올렸습니다', 3000, null, { type: 'ok' }); paint(); } catch (err) { toast('⚠ ' + err.message); e.target.disabled = false; } }, 'c') : null,
+          BTN('삭제', async e => { if (!confirm('이 이미지를 갤러리에서 삭제할까요?' + (g.cloud ? ' (클라우드에서도 삭제)' : ''))) return; if (g.local) await delLocal(g.id); if (g.cloud && Cloud.user) { try { await Cloud.delGallery(g.id); } catch (err) { toast('⚠ ' + err.message); } } all = all.filter(x => x !== g); paint(); }, 'c')))));
+    };
+    const loc = (await listLocal()).map(g => ({ ...g, local: 1 }));
+    let cl = []; if (Cloud.user) { try { cl = (await Cloud.listGallery()).map(g => ({ ...g, cloud: 1 })); } catch (e) { toast('⚠ 클라우드 갤러리를 불러오지 못했습니다: ' + e.message, 5000); } }
+    const map = new Map(); [...loc, ...cl].forEach(g => { const o = map.get(g.id); map.set(g.id, o ? { ...o, ...g, local: o.local || g.local, cloud: o.cloud || g.cloud } : g); });
+    all = [...map.values()].sort((a, b) => b.t - a.t); paint();
   }
 
   // ---------- Firebase 설정 ----------
@@ -649,7 +672,7 @@ ${sceneText(viewKey)}`;
   }
   const shrinkImg = (src, max) => new Promise(res => { const i = new Image(); i.onload = () => { const k = Math.min(1, max / Math.max(i.width, i.height)), c = document.createElement('canvas'); c.width = Math.round(i.width * k); c.height = Math.round(i.height * k); c.getContext('2d').drawImage(i, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.82)); }; i.onerror = () => res(src); i.src = src; });
   // ---------- 참고 사진 → 3D 적용 ----------
-  const PERSON_KEYS = `sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, body(체형) std|slim|muscle|curvy|plump|petite, hs(머리) ${A.HAIRS.map(o => o[0]).join('|')}, bangs 1/0, hair/skin/shoe/tie/c3 #hex, color=상의 #hex, c2=하의 #hex, sleeve long|short|none, tieT none|tie|bow, skirtL 0.3~1, glasses/flower/bouquet/veil 1/0, pose ${Object.keys(A.POSES).join('|')} 또는 aL/aR(팔 들기 -60~180°) zL/zR(0앞~90옆) eL/eR(팔꿈치 0~150) leg(-1~1) yaw(고개 -70~70) sit 1/0, shw/build(0.8~1.4)`;
+  const PERSON_KEYS = `sex m|f|c, outfit ${A.OUTFITS.map(o => o[0]).join('|')}, body(체형) std|slim|muscle|curvy|plump|petite, hs(머리) ${A.HAIRS.map(o => o[0]).join('|')}, bangs 1/0, hair/skin/shoe/tie/c3 #hex, color=상의 #hex, c2=하의 #hex, sleeve long|short|none, tieT none|tie|bow, skirtL 0.3~1, glasses/flower/bouquet/veil 1/0, pose ${Object.keys(A.POSES).join('|')} 또는 aL/aR(팔 들기 -60~180°) zL/zR(0앞~90옆) eL/eR(팔꿈치 0~150) leg(-1~1) yaw(고개 좌우 -70~70) pitch(고개 상하: +들기 -숙이기, -45~45) sit 1/0, shw/build(0.8~1.4)`;
   const REFSYS = (kind, cur) => kind === 'person'
     ? `참고 사진(첨부 순서대로 용도가 적혀 있음)을 보고 3D 인물 모델 값을 정합니다. 사진 속 인물의 신원·이름은 절대 추정하지 않고 외형만 봅니다. 노출이 심한 옷차림은 가장 가까운 일상복·수영복 값으로 대신합니다. 지정된 용도의 사진에서만 그 항목을 가져오세요(예: '옷차림' 사진 → 옷·색, '자세' 사진 → 팔·다리 각도, '체형' 사진 → body/shw/build, '얼굴' 사진 → face_box·skin·glasses).
 JSON 하나만: {"set":{바꿀 값만 — ${PERSON_KEYS}},"face":{"img":얼굴 사진 번호(0부터),"face_box":[ymin,xmin,ymax,xmax](0~1000)} (얼굴 사진이 있을 때만),"desc":"실사 렌더용 영어 외형 설명 (옷 소재·색·스타일, 헤어, 체형, 자세 느낌; 신원 언급 금지, 60단어 이내)","note":"무엇을 반영했는지 한국어 한두 문장"}
@@ -694,5 +717,5 @@ JSON 하나만: {"set":{바꿀 값만 — ${PERSON_KEYS}},"face":{"img":얼굴 �
     }
     return { imgs: out, map, text: lines.length ? `\nATTACHED REFERENCE IMAGES (from #${start}): ${lines.join(' ')} Apply each reference ONLY to its object and only for the named aspect; keep positions, sizes, poses and camera from image #1.` : '' };
   }
-  return { render, openPhoto, openRender, openSettings, openGallery, saveFirebase, copyRules, onLogin, modelFor, openFace, openLink, copyCfgFile, analyzeRefs, collectRenderRefs };
+  return { render, openPhoto, openRender, openSettings, openGallery, autoGallery, saveFirebase, copyRules, onLogin, modelFor, openFace, openLink, copyCfgFile, analyzeRefs, collectRenderRefs };
 }
